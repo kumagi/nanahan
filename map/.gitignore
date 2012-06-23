@@ -1,0 +1,7 @@
+*.o
+*.data
+*.gcda
+*.tar.gz
+*.sh
+*.a
+test_map
