@@ -4,4 +4,5 @@
 *.tar.gz
 *.sh
 *.a
+a.out
 test_map
