@@ -61,12 +61,22 @@ require 'gruff'
 def save_graph result,work
   g = Gruff::Line.new "800x600"
   g.theme_37signals
+
   g.title = "#{work} result"
   target = result[work]
   target.each{ |k,v|
     g.data(k,
            v.map{|k,v| v[:avg]})
   }
+  g.minimum_value = 0
+  target.each{ |k,v|
+    v.each{ |key, value|
+      while g.maximum_value < value[:avg]
+        g.maximum_value += 25000000
+      end
+    }
+  }
+
   g.y_axis_label = "query / sec"
   g.x_axis_label = "#{work} quantity"
 
