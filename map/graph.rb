@@ -60,7 +60,6 @@ result = File.open("result.txt", "r"){ |f|
 require 'gruff'
 def save_graph result,work
   g = Gruff::Line.new "800x600"
-  g.theme_37signals
 
   g.title = "#{work} result"
   target = result[work]
