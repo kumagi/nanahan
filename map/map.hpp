@@ -90,14 +90,12 @@ public:
   public:
     iterator(bucket* b, bucket* buckets, size_t size)
       :it_(b), buckets_(buckets),size_(size){}
-    const std::pair<const Key, Value>* operator->()const{return it_->kvp_;}
-    std::pair<const Key, Value>* operator->(){return it_->kvp_;}
+    std::pair<const Key, Value>* operator->()const{return it_->kvp_;}
     //iterator(const iterator&) = default;
     //iterator(iterator&& i):it_(i.it_),buckets_(i.buckets_),size_(i.size_){}
     bool operator==(const iterator& rhs)const{ return it_ == rhs.it_; }
     bool operator!=(const iterator& rhs)const{ return !operator==(rhs); }
-    const std::pair<const Key, Value>& operator*()const{ return *it_->kvp_; }
-    std::pair<const Key, Value>& operator*(){ return *it_->kvp_; }
+    std::pair<const Key, Value>& operator*()const{ return *it_->kvp_; }
     bool is_end()const{ return buckets_ + size_ == it_; }
     iterator operator++(){
       do{
