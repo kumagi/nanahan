@@ -118,8 +118,8 @@ public:
     }
     iterator();
     bucket* it_;
-    const bucket* const buckets_;
-    const size_t size_;
+    const bucket* buckets_;
+    size_t size_;
     friend class nanahan::Map<Key,Value,Hash,Pred,Alloc>;
   };
   Map(size_t initial_size = 8)
