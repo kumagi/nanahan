@@ -237,7 +237,12 @@ public:
     assert(empty_bucket->kvp_ == NULL);
 
     Kvp *new_kvp = allocator_.allocate(1);
-    allocator_.construct(new_kvp, kvp);
+    try {
+      allocator_.construct(new_kvp, kvp);
+    } catch (...) {
+      allocator_.deallocate(new_kvp, 1);
+      throw;
+    }
     //std::cout << "dist:" << distance << std::endl;
     empty_bucket->kvp_ = new_kvp;
     target_bucket->set_slot_bit(distance);
