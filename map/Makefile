@@ -13,11 +13,11 @@ NOTIFY=&& notify-send Test success! -i ~/themes/ok_icon.png || notify-send Test 
 
 target:test
 
-test_map:test_map.o libgtest.a
-	$(CXX) $^ -o $@ $(OPTS) $(TEST_LD) $(WARNS)
+test_map:test_map.o map.o libgtest.a
+	$(CXX) $^ -o $@ $(OPTS) $(PROF) $(TEST_LD) $(WARNS)
 test:test_map
 	./test_map --gtest_color=no $(NOTIFY)
-test_map.o:test_map.cc map.hpp
+%.o:%.cc map.hpp
 	$(CXX) -c $< -o $@ $(OPTS) $(PROF) $(GTEST_INC) $(HASHMAP_OPS) $(WARNS)
 
 # gtest

@@ -4,6 +4,14 @@
 #include <set>
 #include <memory.h>
 #include <boost/random.hpp>
+
+extern template class nanahan::Map<int, int>;
+extern template class nanahan::Map<uint64_t, std::string>;
+extern template class nanahan::Map<std::string, std::string>;
+extern template class nanahan::Map<bool, bool>;
+extern template class nanahan::Map<std::string, int>;
+extern template class nanahan::Map<std::string, uint32_t>;
+
 TEST(map, construct){
   nanahan::Map<int, int> m;
   nanahan::Map<uint64_t, std::string> n;
@@ -156,7 +164,7 @@ TEST(map, erase_half){
 TEST(map, erase_half_string){
   nanahan::Map<std::string, uint32_t> m;
   const uint32_t size = 200;
-  char buff[8];
+  char buff[8] = {};
   memcpy(buff, "buff", 4);
   for (uint32_t i = 0; i<size; ++i){
     memcpy(&buff[4], &i, 4);

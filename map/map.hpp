@@ -17,33 +17,35 @@ using boost::hash;
 //using std::hash;
 
 namespace detail{
-size_t bitcount(uint32_t bits) {
-  bits = (bits & 0x55555555LU) + (bits >> 1 & 0x55555555LU);
-  bits = (bits & 0x33333333LU) + (bits >> 2 & 0x33333333LU);
-  bits = (bits & 0x0f0f0f0fLU) + (bits >> 4 & 0x0f0f0f0fLU);
-  bits = (bits & 0x00ff00ffLU) + (bits >> 8 & 0x00ff00ffLU);
-  return (bits & 0x0000ffffLU) + (bits >>16 & 0x0000ffffLU);
+template <typename T, size_t N>
+struct bitcount_impl;
+template <typename T>
+struct bitcount_impl<T, 4> {
+  static size_t call(T bits) {
+    bits = (bits & 0x55555555) + (bits >> 1 & 0x55555555);
+    bits = (bits & 0x33333333) + (bits >> 2 & 0x33333333);
+    bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
+    bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
+    return (bits & 0x0000ffff) + (bits >>16 & 0x0000ffff);
+  }
+};
+template <typename T>
+struct bitcount_impl<T, 8> {
+  static size_t call(T bits) {
+    bits = (bits & 0x5555555555555555) + (bits >> 1 & 0x5555555555555555);
+    bits = (bits & 0x3333333333333333) + (bits >> 2 & 0x3333333333333333);
+    bits = (bits & 0x0f0f0f0f0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f0f0f0f0f);
+    bits = (bits & 0x00ff00ff00ff00ff) + (bits >> 8 & 0x00ff00ff00ff00ff);
+    bits = (bits & 0x0000ffff0000ffff) + (bits >>16 & 0x0000ffff0000ffff);
+    return (bits & 0x00000000ffffffff) + (bits >>32 & 0x00000000ffffffff);
+  }
+};
+template <typename T>
+inline size_t bitcount(T bits) { return bitcount_impl<T, sizeof(T)>::call(bits); }
 }
 
-size_t bitcount(uint64_t bits) {
-  bits = (bits & 0x5555555555555555LLU) + (bits >> 1 & 0x5555555555555555LLU);
-  bits = (bits & 0x3333333333333333LLU) + (bits >> 2 & 0x3333333333333333LLU);
-  bits = (bits & 0x0f0f0f0f0f0f0f0fLLU) + (bits >> 4 & 0x0f0f0f0f0f0f0f0fLLU);
-  bits = (bits & 0x00ff00ff00ff00ffLLU) + (bits >> 8 & 0x00ff00ff00ff00ffLLU);
-  bits = (bits & 0x0000ffff0000ffffLLU) + (bits >>16 & 0x0000ffff0000ffffLLU);
-  return (bits & 0x00000000ffffffffLLU) + (bits >>32 & 0x00000000ffffffffLLU);
-}
-
-}
-
-//#define nanahan_64bit
-#ifdef nanahan_64bit
-# define slot_size uint64_t
-# define one 1LLU
-#else
-# define slot_size uint32_t
-# define one 1LU
-#endif
+typedef size_t slot_size;
+static const size_t one = 1;
 
 
 template<typename Key,
@@ -56,13 +58,11 @@ class Map{
 private:
   typedef Map<Key,Value,Hash,Pred,Alloc> ThisMap;
   typedef slot_size Slot;
-  static const uint64_t INITIAL_SIZE = 8;
-  static const uint32_t SLOTSIZE = sizeof(Slot) * 8;
-  static const uint32_t HOP_RANGE = SLOTSIZE * 8;
+  static const size_t INITIAL_SIZE = 8;
+  static const size_t SLOTSIZE = sizeof(Slot) * 8;
+  static const size_t HOP_RANGE = SLOTSIZE * 8;
   typedef typename std::pair<const Key, Value> Kvp;
   struct bucket{
-    Slot slot_;
-    std::pair<const Key, Value> *kvp_;
     bucket()
       :slot_(0), kvp_(NULL){}
     void dump()const{
@@ -73,6 +73,15 @@ private:
         std::cout << "(" << kvp_->first << "=>" << kvp_->second << ")";
       }
     }
+    void set_slot_bit(int pos) { slot_ |= one << pos; }
+    void drop_slot_bit(int pos) { slot_ &= ~(one << pos); }
+    void clear_slot() { slot_ = 0; }
+    Slot get_slot() const { return slot_; }
+    void set_slot_explicit(Slot slot) { slot_ = slot; }
+  private:
+    Slot slot_;
+  public:
+    std::pair<const Key, Value> *kvp_;
   };
   static typename Alloc::template rebind<bucket>::other bucket_alloc;
   static Alloc alloc;
@@ -139,7 +148,7 @@ public:
         allocator_.deallocate(buckets_[i].kvp_, 1);
         buckets_[i].kvp_ = NULL;
       }
-      buckets_[i].slot_ = 0;
+      buckets_[i].clear_slot();
     }
     used_size_ = 0;
     if(bucket_size_ != orig.bucket_size_){
@@ -233,7 +242,7 @@ public:
     empty_bucket->kvp_ = allocator_.allocate(1);
     allocator_.construct(empty_bucket->kvp_, kvp);
     //std::cout << "dist:" << distance << std::endl;
-    target_bucket->slot_ |= one << distance;
+    target_bucket->set_slot_bit(distance);
     ++used_size_;
     //dump();
     return std::make_pair(iterator(empty_bucket, buckets_, bucket_size_),
@@ -305,9 +314,9 @@ public:
     allocator_.deallocate(target->kvp_, 1);
     target->kvp_ = NULL;
     for(Slot i = 1; i != 0; i <<= 1){
-      if((start_bucket->slot_ & i) != 0){
+      if((start_bucket->get_slot() & i) != 0){
         --used_size_;
-        start_bucket->slot_ &= ~i;
+        start_bucket->set_slot_explicit(start_bucket->get_slot() & ~i);
         return iterator(target , buckets_, bucket_size_);
       }
       --start_bucket;
@@ -322,9 +331,9 @@ public:
   }
   iterator find(const Key& key, const size_t hashvalue)const
   {
-    const unsigned int target = locate(hashvalue, 0);
+    const size_t target = locate(hashvalue, 0);
     bucket *target_bucket = buckets_ + target;
-    Slot slot_info = target_bucket->slot_;
+    Slot slot_info = target_bucket->get_slot();
     /*
     std::cout << "search:[" << target << "] for " << key <<std::endl;
     //*/
@@ -337,10 +346,10 @@ public:
       //*/
       if((slot_info & 1)){
         assert(target_bucket);
-        if(pred(target_bucket->kvp_->first, key)){
+        if(target_bucket->kvp_ && pred(target_bucket->kvp_->first, key)){
           return iterator(target_bucket, buckets_, bucket_size_);
         }
-        slot_info &= ~1;
+        slot_info &= ~one;
       }
       const size_t gap = detail::bitcount((~slot_info) & (slot_info - 1));
       slot_info >>= gap;
@@ -360,7 +369,7 @@ public:
 
     for(size_t i = SLOTSIZE - 1; 0 < i; --i, move_bucket = next(move_bucket)){
       for(size_t j = 0; j <= i; ++j){
-        if(move_bucket->slot_ & (one << j)){
+        if(move_bucket->get_slot() & (one << j)){
           (*free_bucket)->kvp_ = bucket_index(move_bucket, j).kvp_;
           /*
           std::cout << "moving from " << j << " to " << i << "bucket";
@@ -368,8 +377,8 @@ public:
           std::cout  << std::endl;
           //*/
           bucket_index(move_bucket,j).kvp_ = NULL;
-          move_bucket->slot_ &= ~(one << j);
-          move_bucket->slot_ |= one << i;
+          move_bucket->drop_slot_bit(j);
+          move_bucket->set_slot_bit(i);
           *free_bucket = &bucket_index(move_bucket,j);
           *distance -= i - j;
           return;
@@ -409,7 +418,7 @@ public:
         buckets_[i].kvp_->~Kvp();
         allocator_.deallocate(buckets_[i].kvp_, 1);
       }
-      buckets_[i].slot_ = 0;
+      buckets_[i].clear_slot();
     }
     delete[] buckets_;
     buckets_ = new bucket[INITIAL_SIZE];
@@ -463,7 +472,7 @@ private:
     assert(empty_bucket->kvp_ == NULL);
 
     empty_bucket->kvp_ = kvp;
-    target_bucket->slot_ |= one << distance;
+    target_bucket->set_slot_bit(distance);
     return true;
   }
   inline size_t locate(size_t start, size_t diff)const{
@@ -480,7 +489,7 @@ private:
     bucket* target = start + index;
     return target < &buckets_[bucket_size_] ? *target : *(target - bucket_size_);
   }
-  uint64_t bucket_size_;
+  size_t bucket_size_;
   bucket* buckets_;
   size_t used_size_;
   Alloc allocator_;
@@ -489,7 +498,5 @@ private:
 
 
 } // namespace nanahan
-#undef nanahan_64bit
-#undef one
-#undef slot_size
+
 #endif
