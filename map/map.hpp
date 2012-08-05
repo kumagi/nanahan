@@ -128,38 +128,35 @@ public:
     :bucket_size_(initial_size),
      buckets_(new bucket[bucket_size_]),
      used_size_(0),
-     extending_(false)
+     dont_destroy_elements_(false)
   {}
   Map(const ThisMap& orig)
     :bucket_size_(orig.bucket_size_),
      buckets_(new bucket[bucket_size_]),
      used_size_(0),
-     extending_(false)
+     dont_destroy_elements_(false)
   {
-    iterator it = orig.begin();
-    for(; it != orig.end(); ++it){
-      insert(*it);
+    try {
+      iterator it = orig.begin();
+      for(; it != orig.end(); ++it){
+        insert(*it);
+      }
+    } catch (...) {
+      destroy_elements();
+      delete[] buckets_;
     }
   }
   Map& operator=(const Map& orig){
-    for(size_t i = 0; i < bucket_size_; ++i){
-      if(buckets_[i].kvp_ != NULL){
-        buckets_[i].kvp_->~Kvp();
-        allocator_.deallocate(buckets_[i].kvp_, 1);
-        buckets_[i].kvp_ = NULL;
-      }
-      buckets_[i].clear_slot();
-    }
-    used_size_ = 0;
-    if(bucket_size_ != orig.bucket_size_){
-      delete[] buckets_;
-      buckets_ = new bucket[orig.bucket_size_];
-    }
-    iterator it = orig.begin();
-    for(; it != orig.end(); ++it){
-      insert(*it);
-    }
+    Map cp(orig);
+    this->swap(cp);
     return *this;
+  }
+  void swap(Map &other){
+    std::swap(allocator_, other.allocator_);
+    std::swap(bucket_size_, other.bucket_size_);
+    std::swap(buckets_, other.buckets_);
+    std::swap(used_size_, other.used_size_);
+    std::swap(dont_destroy_elements_, other.dont_destroy_elements_);
   }
   template<typename T>
   bool operator==(const T& rhs)const{
@@ -239,9 +236,10 @@ public:
 
     assert(empty_bucket->kvp_ == NULL);
 
-    empty_bucket->kvp_ = allocator_.allocate(1);
-    allocator_.construct(empty_bucket->kvp_, kvp);
+    Kvp *new_kvp = allocator_.allocate(1);
+    allocator_.construct(new_kvp, kvp);
     //std::cout << "dist:" << distance << std::endl;
+    empty_bucket->kvp_ = new_kvp;
     target_bucket->set_slot_bit(distance);
     ++used_size_;
     //dump();
@@ -260,19 +258,19 @@ public:
     //*/
     while(true){
       Map new_map(new_size);
+      new_map.dont_destroy_elements_ = true;
       bool ok = true;
       iterator end_it = end();
       for(iterator it = begin(); it != end_it; ++it){
         const bool result = new_map.insert_unsafe(&*it);
         if(!result){ // failed to insert
-          std::cout << "failed to insert_unsafe()" << std::endl;
+          //std::cout << "failed to insert_unsafe()" << std::endl;
           ok = false;
           break;
         }
       }
       if(!ok){
         new_size *= 2;
-        new_map.clear_unsafe();
         continue;
       }else{
         /*
@@ -285,7 +283,6 @@ public:
         std::swap(buckets_, new_map.buckets_);
         bucket_size_ = new_size;
         std::swap(allocator_, new_map.allocator_);
-        new_map.clear_unsafe();
 
         /*
           std::cout << "new map" << std::endl;
@@ -413,6 +410,22 @@ public:
     std::cout << "total:" << used_size_ << std::endl;
   }
   void clear(){
+    bucket* const new_bk = new bucket[INITIAL_SIZE];
+    destroy_elements();
+    buckets_ = new_bk;
+    bucket_size_ = INITIAL_SIZE;
+    used_size_ = 0;
+    delete[] buckets_;
+  }
+  ~Map(){
+    //dump();
+    if(!dont_destroy_elements_){
+      destroy_elements();
+    }
+    delete[] buckets_;
+  }
+private:
+  void destroy_elements() /*nothrow*/ {
     for(size_t i = 0; i < bucket_size_; ++i){
       if(buckets_[i].kvp_ != NULL){
         buckets_[i].kvp_->~Kvp();
@@ -420,22 +433,6 @@ public:
       }
       buckets_[i].clear_slot();
     }
-    delete[] buckets_;
-    buckets_ = new bucket[INITIAL_SIZE];
-    bucket_size_ = INITIAL_SIZE;
-    used_size_ = 0;
-  }
-  ~Map(){
-    //dump();
-    if(!extending_){
-      clear();
-    }
-    delete[] buckets_;
-  }
-private:
-  inline void clear_unsafe(){
-    extending_ = true;
-    return;
   }
   inline bool insert_unsafe(std::pair<const Key, Value>* const kvp)
   {
@@ -493,7 +490,7 @@ private:
   bucket* buckets_;
   size_t used_size_;
   Alloc allocator_;
-  bool extending_;
+  bool dont_destroy_elements_;
 };
 
 
