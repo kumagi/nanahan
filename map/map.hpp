@@ -9,7 +9,7 @@
 #include <memory>
 #include <utility>
 #include <assert.h>
-
+#include <iterator>
 #include <iostream>
 
 namespace nanahan{
@@ -85,43 +85,137 @@ private:
   };
   static typename Alloc::template rebind<bucket>::other bucket_alloc;
   static Alloc alloc;
-public:
-  class iterator{
-  public:
-    iterator(bucket* b, bucket* buckets, size_t size)
-      :it_(b), buckets_(buckets),size_(size){}
-    std::pair<const Key, Value>* operator->()const{return it_->kvp_;}
-    //iterator(const iterator&) = default;
-    //iterator(iterator&& i):it_(i.it_),buckets_(i.buckets_),size_(i.size_){}
-    bool operator==(const iterator& rhs)const{ return it_ == rhs.it_; }
-    bool operator!=(const iterator& rhs)const{ return !operator==(rhs); }
-    std::pair<const Key, Value>& operator*()const{ return *it_->kvp_; }
-    bool is_end()const{ return buckets_ + size_ == it_; }
-    iterator operator++(){
-      do{
+
+private:
+  template <typename Derived, typename ValueType>
+  class iterator_base {
+  protected:
+    iterator_base(bucket* b, bucket const* buckets, size_t size)
+      : it_(b), buckets_(buckets), size_(size)
+    {}
+
+    ValueType* operator->() const {
+      return it_->kvp_;
+    }
+
+    friend bool operator==(const Derived& lhs, const Derived& rhs) {
+      const iterator_base& l = (const iterator_base&)lhs;
+      const iterator_base& r = (const iterator_base&)rhs;
+      return l.it_ == r.it_;
+    }
+    friend bool operator!=(const Derived& lhs, const Derived& rhs) {
+      return !(lhs == rhs);
+    }
+
+    ValueType& operator*() const {
+      return *it_->kvp_;
+    }
+
+    bool is_end() const { return buckets_ + size_ == it_; }
+
+    Derived& operator++() {
+      do {
         ++it_;
-      }while(it_ != &buckets_[size_] && it_->kvp_ == NULL);
-      return *this;
+      } while (it_ != &buckets_[size_] && it_->kvp_ == NULL);
+      return static_cast<Derived&>(*this);
     }
-    iterator operator--(){
-      do{
+    Derived operator++(int) {
+      Derived ret = static_cast<Derived&>(*this);
+      ++*this;
+      return ret;
+    }
+
+    Derived& operator--() {
+      do {
         --it_;
-      }while(it_ != &buckets_[0] && it_->kvp_ == NULL);
-      return *this;
+      } while (it_ != &buckets_[0] && it_->kvp_ == NULL);
+      return static_cast<Derived&>(*this);
     }
-    void dump()const{
+    Derived operator--(int) {
+      Derived ret = static_cast<Derived&>(*this);
+      --*this;
+      return ret;
+    }
+
+    void dump() const {
       it_->dump();
     }
-  private:
+
     void remove_unsafe(){
       it_->kvp_ = NULL;
     }
-    iterator();
+
     bucket* it_;
     const bucket* buckets_;
     size_t size_;
-    friend class nanahan::Map<Key,Value,Hash,Pred,Alloc>;
   };
+
+public:
+  class iterator : iterator_base<iterator, std::pair<const Key, Value> > {
+    typedef iterator_base<iterator, std::pair<const Key, Value> > base_t;
+
+  public:
+    typedef std::pair<const Key, Value> value_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef value_type* pointer;
+    typedef value_type& reference;
+    typedef std::bidirectional_iterator_tag iterator_category;
+
+    iterator() : base_t(0, 0, 0) {}
+
+    using base_t::operator->;
+    using base_t::operator*;
+    using base_t::is_end;
+    using base_t::operator++;
+    using base_t::operator--;
+    using base_t::dump;
+    using base_t::remove_unsafe;
+
+  private:
+    iterator(bucket* b, bucket const* buckets, size_t size)
+      : base_t(b, buckets, size)
+    {}
+
+    friend class Map;
+  };
+
+  class const_iterator : public iterator_base<const_iterator, const std::pair<const Key, Value> > {
+    typedef iterator_base<const_iterator, const std::pair<const Key, Value> > base_t;
+
+  public:
+    typedef std::pair<const Key, Value> value_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef value_type* pointer;
+    typedef value_type& reference;
+    typedef std::bidirectional_iterator_tag iterator_category;
+
+    const_iterator() : base_t(0, 0, 0) {}
+
+    const_iterator(const iterator& it)
+      : base_t((const base_t&)it)
+    {}
+
+    using base_t::operator->;
+    using base_t::operator*;
+    using base_t::is_end;
+    using base_t::operator++;
+    using base_t::operator--;
+    using base_t::dump;
+
+  private:
+    const_iterator(bucket* b, bucket const* buckets, size_t size)
+      : base_t(b, buckets, size)
+    {}
+
+    friend class Map;
+  };
+
+private:
+  static iterator const_iterator_to_iterator(const const_iterator& it) {
+    return iterator(it.it_, it.buckets_, it.size_);
+  }
+
+public:
   Map(size_t initial_size = 8)
     :bucket_size_(initial_size),
      buckets_(new bucket[bucket_size_]),
@@ -135,7 +229,7 @@ public:
      dont_destroy_elements_(false)
   {
     try {
-      iterator it = orig.begin();
+      const_iterator it = orig.begin();
       for(; it != orig.end(); ++it){
         insert(*it);
       }
@@ -159,9 +253,9 @@ public:
   template<typename T>
   bool operator==(const T& rhs)const{
     {
-      iterator it = begin();
+      const_iterator it = begin();
       for(; it != end(); ++it){
-        typename T::iterator result = rhs.find(it->first);
+        typename T::const_iterator result = rhs.find(it->first);
         if(result == rhs.end()){
           return false;
         }
@@ -171,9 +265,9 @@ public:
       }
     }
     {
-      typename T::iterator it = rhs.begin();
+      typename T::const_iterator it = rhs.begin();
       for(; it != rhs.end(); ++it){
-        iterator result = find(it->first);
+        const_iterator result = find(it->first);
         if(result == rhs.end()){
           return false;
         }
@@ -195,7 +289,7 @@ public:
     bucket* target_bucket = buckets_ + target_slot;
     iterator searched = find(kvp.first, hashvalue);
     if(!searched.is_end()){
-      return std::make_pair(searched, false);
+      return std::make_pair(const_iterator_to_iterator(searched), false);
     }
 
     //std::cout << "insert: " << kvp.first << std::endl;
@@ -299,15 +393,15 @@ public:
   }
 
   /* erase the data*/
-  iterator erase(iterator where)
+  void erase(const_iterator where)
   {
     bucket* const target = where.it_;
     bucket* start_bucket = target;
     if(where.is_end()){
       //std::cout << "erase: end() passed"<< std::endl;
-      return end();
+      return;
     }
-    if(find(where->first).is_end()){return end();}
+    if (find(where->first).is_end()) return;
 
     //std::cout << "erase!" << slot->kvp_->first << std::endl;
     allocator_.destroy(target->kvp_);
@@ -317,19 +411,26 @@ public:
       if((start_bucket->get_slot() & i) != 0){
         --used_size_;
         start_bucket->set_slot_explicit(start_bucket->get_slot() & ~i);
-        return iterator(target , buckets_, bucket_size_);
+        return;
       }
       --start_bucket;
     }
     //std::cout << "erased:" << std::endl;
-    return end();
   }
 
-  iterator find(const Key& key) const
+  iterator find(const Key& key) {
+    return const_iterator_to_iterator(
+      const_cast<const Map*>(this)->find(key));
+  }
+  const_iterator find(const Key& key) const
   {
     return find(key, Hash()(key));
   }
-  iterator find(const Key& key, const size_t hashvalue)const
+  iterator find(const Key& key, const size_t hashvalue) {
+    return const_iterator_to_iterator(
+      const_cast<const Map*>(this)->find(key, hashvalue));
+  }
+  const_iterator find(const Key& key, const size_t hashvalue) const
   {
     const size_t target = locate(hashvalue, 0);
     bucket *target_bucket = buckets_ + target;
@@ -388,18 +489,25 @@ public:
     *free_bucket = NULL;
     *distance = 0;
   }
-  iterator begin()const{
+  iterator begin() {
+    return const_iterator_to_iterator(cbegin());
+  }
+  iterator end() {
+    return const_iterator_to_iterator(cend());
+  }
+  const_iterator begin() const {
+    return cbegin();
+  }
+  const_iterator end() const {
+    return cend();
+  }
+  const_iterator cbegin() const {
     bucket* head = buckets_;
     while(head->kvp_ == NULL && head != &buckets_[bucket_size_]){++head;}
-    return iterator(head, buckets_, bucket_size_);
+    return const_iterator(head, buckets_, bucket_size_);
   }
-  iterator end()const{
-    return iterator(&buckets_[bucket_size_], buckets_, bucket_size_);
-  }
-  iterator begin(){
-    bucket* head = buckets_;
-    while(head->kvp_ == NULL && head != &buckets_[bucket_size_]){++head;}
-    return iterator(head, buckets_, bucket_size_);
+  const_iterator cend() const {
+    return const_iterator(&buckets_[bucket_size_], buckets_, bucket_size_);
   }
 
   size_t size()const{return used_size_;}
