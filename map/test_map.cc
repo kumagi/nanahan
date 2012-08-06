@@ -85,7 +85,7 @@ TEST(map, insert_eight_string){
   for (int i = 0; i<8; ++i){
     orig[2] = i + '0';
     orig[4] = i + '0';
-    nanahan::Map<std::string, int>::iterator it = m.find(std::string(orig));
+    nanahan::Map<std::string, int>::const_iterator it = m.find(std::string(orig));
     ASSERT_NE(it, m.end());
     ASSERT_NE(m.find(std::string(orig)), m.end());
     ASSERT_EQ(m.find(std::string(orig))->first, std::string(orig));
@@ -173,11 +173,12 @@ TEST(map, erase_half_string){
   //m.dump();
   for (uint32_t i = 0; i<size; i += 2){
     memcpy(&buff[4], &i, 4);
-    if(m.erase(m.find(std::string(buff))) == m.end()){
-      std::cout << "failed to erase " <<i << std::endl;
-      //m.dump();
-      ASSERT_FALSE(true);
-    }
+    m.erase(m.find(std::string(buff)));
+    // if(m.erase(m.find(std::string(buff))) == m.end()){
+    //   std::cout << "failed to erase " <<i << std::endl;
+    //   //m.dump();
+    //   ASSERT_FALSE(true);
+    // }
   }
   //m.dump();
   for (uint32_t i = 0; i<size; i += 2){
@@ -344,4 +345,127 @@ TEST(operator, equal){
   EXPECT_TRUE(m==n);
   EXPECT_FALSE(m==o);
   EXPECT_FALSE(o==n);
+}
+
+TEST(map, iterator)
+{
+  typedef nanahan::Map<int, int> map;
+  typedef map::iterator iterator;
+  typedef map::const_iterator const_iterator;
+
+  // DefaultConstructible
+  {
+    iterator it;
+    const_iterator cit;
+  }
+
+  // CopyConstructible
+  {
+    map m;
+
+    iterator it = m.begin();
+    EXPECT_EQ(it, m.begin());
+    iterator it2(m.end());
+    EXPECT_EQ(it2, m.end());
+
+    const_iterator cit = m.cbegin();
+    EXPECT_EQ(cit, m.cbegin());
+    const_iterator cit2(m.cend());
+    EXPECT_EQ(cit2, m.cend());
+  }
+
+  // CopyAssignable
+  {
+    map m;
+
+    iterator it;
+    it = it;
+    it = m.begin();
+    EXPECT_EQ(it, m.begin());
+
+    const_iterator cit;
+    cit = cit;
+    cit = m.cend();
+    EXPECT_EQ(cit, m.cend());
+  }
+
+  // EqualityComparable+
+  {
+    map m;
+
+    iterator it = m.begin();
+    EXPECT_TRUE(it == it);
+    EXPECT_FALSE(it != it);
+
+    const_iterator cit = m.cbegin();
+    EXPECT_TRUE(cit == cit);
+    EXPECT_FALSE(cit != cit);
+
+    EXPECT_TRUE(it == cit);
+    EXPECT_TRUE(cit == it);
+    EXPECT_FALSE(it != cit);
+    EXPECT_FALSE(cit != it);
+
+    EXPECT_TRUE(m.begin() == m.begin());
+    EXPECT_TRUE(m.begin() == m.end());
+    EXPECT_TRUE(m.end() == m.begin());
+    EXPECT_TRUE(m.end() == m.end());
+    EXPECT_FALSE(m.begin() != m.begin());
+    EXPECT_FALSE(m.begin() != m.end());
+    EXPECT_FALSE(m.end() != m.begin());
+    EXPECT_FALSE(m.end() != m.end());
+  }
+
+  // dereference
+  {
+    map m;
+    std::pair<int const, int> p(1, 2);
+    m.insert(p);
+
+    iterator it = m.begin();
+    EXPECT_EQ(p, *it);
+    EXPECT_EQ(1, it->first);
+    EXPECT_EQ(2, it->second);
+
+    const_iterator cit = m.begin();
+    EXPECT_EQ(p, *cit);
+    EXPECT_EQ(1, cit->first);
+    EXPECT_EQ(2, cit->second);
+  }
+
+  // increment
+  {
+    map m;
+    m.insert(std::make_pair(1, 2));
+    m.insert(std::make_pair(2, 3));
+    m.insert(std::make_pair(3, 4));
+
+    iterator it = m.begin();
+    EXPECT_EQ(3, (++it)->second);
+    EXPECT_EQ(3, it++->second);
+    EXPECT_EQ((std::pair<const int, int>(3, 4)),*it++);
+
+    const_iterator cit = m.cbegin();
+    EXPECT_EQ(3, (++cit)->second);
+    EXPECT_EQ(3, cit++->second);
+    EXPECT_EQ((std::pair<const int, int>(3, 4)),*cit++);
+  }
+
+  // decrement
+  {
+    map m;
+    m.insert(std::make_pair(1, 2));
+    m.insert(std::make_pair(2, 3));
+    m.insert(std::make_pair(3, 4));
+
+    iterator it = m.end();
+    EXPECT_EQ(4, (--it)->second);
+    EXPECT_EQ(4, it--->second);
+    EXPECT_EQ((std::pair<const int, int>(2, 3)), *it--);
+
+    const_iterator cit = m.cbegin();
+    EXPECT_EQ(4, (--cit)->second);
+    EXPECT_EQ(4, cit--->second);
+    EXPECT_EQ((std::pair<const int, int>(2, 3)), *cit--);
+  }
 }
