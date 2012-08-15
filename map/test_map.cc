@@ -463,7 +463,7 @@ TEST(map, iterator)
     EXPECT_EQ(4, it--->second);
     EXPECT_EQ((std::pair<const int, int>(2, 3)), *it--);
 
-    const_iterator cit = m.cbegin();
+    const_iterator cit = m.cend();
     EXPECT_EQ(4, (--cit)->second);
     EXPECT_EQ(4, cit--->second);
     EXPECT_EQ((std::pair<const int, int>(2, 3)), *cit--);
