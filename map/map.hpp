@@ -67,7 +67,7 @@ private:
       :slot_(0), kvp_(NULL){}
     void dump()const{
        std::cout << "slot[" << slot_ << "] ";
-      if(kvp_ == NULL) {
+      if (kvp_ == NULL) {
         std::cout << "<empty>";
       }else{
         std::cout << "(" << kvp_->first << "=>" << kvp_->second << ")";
@@ -256,10 +256,10 @@ public:
       const_iterator it = begin();
       for(; it != end(); ++it){
         typename T::const_iterator result = rhs.find(it->first);
-        if(result == rhs.end()){
+        if (result == rhs.end()){
           return false;
         }
-        if(result->second != it->second){
+        if (result->second != it->second){
           return false;
         }
       }
@@ -268,10 +268,10 @@ public:
       typename T::const_iterator it = rhs.begin();
       for(; it != rhs.end(); ++it){
         const_iterator result = find(it->first);
-        if(result == rhs.end()){
+        if (result == rhs.end()){
           return false;
         }
-        if(result->second != it->second){
+        if (result->second != it->second){
           return false;
         }
       }
@@ -288,7 +288,7 @@ public:
     //std::cout << "target slot:" << target_slot << std::endl;
     bucket* target_bucket = buckets_ + target_slot;
     iterator searched = find(kvp.first, hashvalue);
-    if(!searched.is_end()){
+    if (!searched.is_end()){
       return std::make_pair(const_iterator_to_iterator(searched), false);
     }
 
@@ -300,19 +300,19 @@ public:
     const size_t max_distance = (HOP_RANGE < bucket_size_ ?
                                  HOP_RANGE : bucket_size_);
     do{
-      if(empty_bucket->kvp_ == NULL) break;
+      if (empty_bucket->kvp_ == NULL) break;
       index = (index + 1) & (bucket_size_ - 1);
       empty_bucket = &buckets_[index];
       ++distance;
-    }while(distance < max_distance);
+    }while (distance < max_distance);
 
-    if(max_distance <= distance){
+    if (max_distance <= distance){
       bucket_extend();
       return insert(kvp);
     }
 
     /* move empty bucket if it was too far */
-    while(empty_bucket != NULL && SLOTSIZE <= distance){
+    while (empty_bucket != NULL && SLOTSIZE <= distance){
       /*
       std::cout << "find closer bucket:" << std::endl;
       std::cout << "distance : " << distance << " => ";
@@ -321,7 +321,7 @@ public:
       //std::cout << distance << std::endl;
     }
 
-    if(empty_bucket == NULL){
+    if (empty_bucket == NULL){
       bucket_extend();
       return insert(kvp);
     }
@@ -353,20 +353,20 @@ public:
       used_size_ << " / " << bucket_size_ << "\t| " <<
       static_cast<double>(used_size_) * 100 / bucket_size_ << " %" << std::endl;
     //*/
-    while(true){
+    while (true){
       Map new_map(new_size);
       new_map.dont_destroy_elements_ = true;
       bool ok = true;
       iterator end_it = end();
       for(iterator it = begin(); it != end_it; ++it){
         const bool result = new_map.insert_unsafe(&*it);
-        if(!result){ // failed to insert
+        if (!result){ // failed to insert
           //std::cout << "failed to insert_unsafe()" << std::endl;
           ok = false;
           break;
         }
       }
-      if(!ok){
+      if (!ok){
         new_size *= 2;
         continue;
       }else{
@@ -397,23 +397,24 @@ public:
   {
     bucket* const target = where.it_;
     bucket* start_bucket = target;
-    if(where.is_end()){
+    if (where.is_end()){
       //std::cout << "erase: end() passed"<< std::endl;
       return;
     }
     if (find(where->first).is_end()) return;
 
-    //std::cout << "erase!" << slot->kvp_->first << std::endl;
     allocator_.destroy(target->kvp_);
     allocator_.deallocate(target->kvp_, 1);
     target->kvp_ = NULL;
     for(Slot i = 1; i != 0; i <<= 1){
-      if((start_bucket->get_slot() & i) != 0){
+      if ((start_bucket->get_slot() & i) != 0){
         --used_size_;
+        /* delete from slotinfo */
         start_bucket->set_slot_explicit(start_bucket->get_slot() & ~i);
         return;
       }
       --start_bucket;
+      start_bucket += start_bucket < buckets_ ? bucket_size_ : 0;
     }
     //std::cout << "erased:" << std::endl;
   }
@@ -426,6 +427,7 @@ public:
   {
     return find(key, Hash()(key));
   }
+private:
   iterator find(const Key& key, const size_t hashvalue) {
     return const_iterator_to_iterator(
       const_cast<const Map*>(this)->find(key, hashvalue));
@@ -439,15 +441,15 @@ public:
     std::cout << "search:[" << target << "] for " << key <<std::endl;
     //*/
     Pred pred; // comperator
-    while(slot_info){
+    while (slot_info){
       /*
       std::cout << "trying " << slot_info << " ";
       target_bucket->dump();
       std::cout << std::endl;
       //*/
-      if((slot_info & 1)){
+      if ((slot_info & 1)){
         assert(target_bucket);
-        if(target_bucket->kvp_ && pred(target_bucket->kvp_->first, key)){
+        if (target_bucket->kvp_ && pred(target_bucket->kvp_->first, key)){
           return iterator(target_bucket, buckets_, bucket_size_);
         }
         slot_info &= ~one;
@@ -464,13 +466,13 @@ public:
   inline void find_closer_bucket(bucket** free_bucket, size_t* distance)
   {
     bucket* move_bucket = *free_bucket - SLOTSIZE + 1;
-    if(move_bucket < buckets_){
+    if (move_bucket < buckets_){
       move_bucket += bucket_size_;
     }
 
     for(size_t i = SLOTSIZE - 1; 0 < i; --i, move_bucket = next(move_bucket)){
       for(size_t j = 0; j <= i; ++j){
-        if(move_bucket->get_slot() & (one << j)){
+        if (move_bucket->get_slot() & (one << j)){
           (*free_bucket)->kvp_ = bucket_index(move_bucket, j).kvp_;
           /*
           std::cout << "moving from " << j << " to " << i << "bucket";
@@ -489,6 +491,7 @@ public:
     *free_bucket = NULL;
     *distance = 0;
   }
+public:
   iterator begin() {
     return const_iterator_to_iterator(cbegin());
   }
@@ -503,7 +506,7 @@ public:
   }
   const_iterator cbegin() const {
     bucket* head = buckets_;
-    while(head->kvp_ == NULL && head != &buckets_[bucket_size_]){++head;}
+    while (head->kvp_ == NULL && head != &buckets_[bucket_size_]){++head;}
     return const_iterator(head, buckets_, bucket_size_);
   }
   const_iterator cend() const {
@@ -530,15 +533,16 @@ public:
   }
   ~Map(){
     //dump();
-    if(!dont_destroy_elements_){
+    if (!dont_destroy_elements_){
       destroy_elements();
     }
     delete[] buckets_;
   }
 private:
-  void destroy_elements() /*nothrow*/ {
+  void destroy_elements() /* nothrow */
+  {
     for(size_t i = 0; i < bucket_size_; ++i){
-      if(buckets_[i].kvp_ != NULL){
+      if (buckets_[i].kvp_ != NULL){
         buckets_[i].kvp_->~Kvp();
         allocator_.deallocate(buckets_[i].kvp_, 1);
       }
@@ -558,22 +562,22 @@ private:
     const size_t max_distance = (HOP_RANGE < bucket_size_ ?
                                  HOP_RANGE : bucket_size_);
     do{
-      if(empty_bucket->kvp_ == NULL) break;
+      if (empty_bucket->kvp_ == NULL) break;
       index = (index + 1) & (bucket_size_ - 1);
       empty_bucket = buckets_ + index;
       ++distance;
-    }while(distance < max_distance);
+    }while (distance < max_distance);
 
-    if(max_distance <= distance){
+    if (max_distance <= distance){
       return false;
     }
 
     /* move empty bucket if it was too far */
-    while(empty_bucket != NULL && SLOTSIZE <= distance){
+    while (empty_bucket != NULL && SLOTSIZE <= distance){
       find_closer_bucket(&empty_bucket, &distance);
     }
 
-    if(empty_bucket == NULL){
+    if (empty_bucket == NULL){
       return false;
     }
 

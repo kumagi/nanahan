@@ -27,22 +27,24 @@ void measure_speed(const std::string& name,TargetType& target, size_t num, eval_
 
   switch(doing){
   case insert:
-    for (size_t i =0; i < num; ++i){
+    for (size_t i = 0; i < num; ++i){
       target.insert(std::make_pair(rand(),i));
     }
     break;
   case find:
-    for (size_t i =0; i < num; ++i){
+    for (size_t i = 0; i < num; ++i){
       target.find(rand());
     }
     break;
   case erase:
-    for (size_t i =0; i < num; ++i){
+  {
+    for (size_t i = 0; i < num; ++i){
       size_t r = rand();
       if(target.find(r) == target.end()){ continue; }
       target.erase(target.find(r));
     }
     break;
+  }
   default:
     std::cout << "invalid target";
   }
@@ -53,7 +55,7 @@ void measure_speed(const std::string& name,TargetType& target, size_t num, eval_
 
 int main(void)
 {
-  for(int i =  1000000; i <= 10000000; i += 1000000){
+  for(int i =  7000000; i <= 10000000; i += 1000000){
     for(int j =0; j<10; ++j){
       boost::unordered_map<int, int> bmap;
       Map<int, int> nmap;
