@@ -77,7 +77,6 @@ inline size_t ntz(T bits) { return ntz_impl<T, sizeof(T)>::call(bits);}
 typedef size_t slot_size;
 static const size_t one = 1;
 
-
 template<typename Key,
          typename Value,
          typename Hash = hash<Key>,
@@ -406,6 +405,7 @@ public:
           std::cout << "to move map" << std::endl;
           new_map.dump();
         //*/
+
         std::swap(buckets_, new_map.buckets_);
         bucket_size_ = new_size;
         std::swap(allocator_, new_map.allocator_);
@@ -486,7 +486,7 @@ private:
       const size_t gap = detail::ntz(slot_info);
       slot_info >>= gap;
       //std::cout << "new slot_info:" << slot_info << " gap:" << gap << std::endl;
-      target_bucket= forward(target_bucket, gap);
+      target_bucket = forward(target_bucket, gap);
     }
     //std::cout << "not found" << std::endl;
     return end();
