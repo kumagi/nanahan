@@ -26,7 +26,7 @@ struct bitcount_impl<T, 4> {
     bits = (bits & 0x33333333) + (bits >> 2 & 0x33333333);
     bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
     bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
-    return (bits & 0x0000ffff) + (bits >>16 & 0x0000ffff);
+    return (bits & 0x0000ffff) + (bits >>16);
   }
 };
 template <typename T>
@@ -37,12 +37,42 @@ struct bitcount_impl<T, 8> {
     bits = (bits & 0x0f0f0f0f0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f0f0f0f0f);
     bits = (bits & 0x00ff00ff00ff00ff) + (bits >> 8 & 0x00ff00ff00ff00ff);
     bits = (bits & 0x0000ffff0000ffff) + (bits >>16 & 0x0000ffff0000ffff);
-    return (bits & 0x00000000ffffffff) + (bits >>32 & 0x00000000ffffffff);
+    return (bits & 0x00000000ffffffff) + (bits >>32);
   }
 };
 template <typename T>
 inline size_t bitcount(T bits) { return bitcount_impl<T, sizeof(T)>::call(bits); }
-}
+
+template <typename T, size_t N>
+struct ntz_impl;
+template <typename T>
+struct ntz_impl<T, 8> {
+  static size_t call(T n){
+    if (n == 0) return 64;
+    unsigned int lo = n & 0xffffffff;
+    int z;
+    if (lo){
+        __asm__("bsf %1, %0;" :"=r"(z) :"r"(lo));
+    return z;
+    }else{
+        n >>= 32;
+        __asm__("bsf %1, %0;" :"=r"(z) :"r"(n));
+        return z + 32;
+    }
+  }
+};
+template <typename T>
+struct ntz_impl<T, 4> {
+  static size_t call(T n){
+    if (n == 0) return 64;
+    int z;
+    __asm__("bsf %1, %0;" :"=r"(z) :"r"(n));
+    return z;
+  }
+};
+template <typename T>
+inline size_t ntz(T bits) { return ntz_impl<T, sizeof(T)>::call(bits);}
+} // detail
 
 typedef size_t slot_size;
 static const size_t one = 1;
@@ -346,10 +376,10 @@ public:
   void bucket_extend(){
     const size_t old_size = bucket_size_;
     size_t new_size = old_size * 2;
+    //std::cout << "resize from " << used_size_ << " of "
+    //bin      << old_size << " -> " << new_size << std::endl;
     /*
-      std::cout << "resize from " << used_size_ << " "
-      << old_size << " -> " << new_size << std::endl;
-    std::cout << "extending dencity: " <<
+    std::cout << "resizing dencity: " <<
       used_size_ << " / " << bucket_size_ << "\t| " <<
       static_cast<double>(used_size_) * 100 / bucket_size_ << " %" << std::endl;
     //*/
@@ -376,7 +406,6 @@ public:
           std::cout << "to move map" << std::endl;
           new_map.dump();
         //*/
-
         std::swap(buckets_, new_map.buckets_);
         bucket_size_ = new_size;
         std::swap(allocator_, new_map.allocator_);
@@ -454,7 +483,7 @@ private:
         }
         slot_info &= ~one;
       }
-      const size_t gap = detail::bitcount((~slot_info) & (slot_info - 1));
+      const size_t gap = detail::ntz(slot_info);
       slot_info >>= gap;
       //std::cout << "new slot_info:" << slot_info << " gap:" << gap << std::endl;
       target_bucket= forward(target_bucket, gap);
