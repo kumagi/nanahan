@@ -49,29 +49,23 @@ template <typename T>
 struct ntz_impl<T, 8> {
   static size_t call(T n){
     if (n == 0) return 64;
-    unsigned int lo = n & 0xffffffff;
-    int z;
-    if (lo){
-        __asm__("bsf %1, %0;" :"=r"(z) :"r"(lo));
+    size_t z;
+    __asm__ volatile ("bsf %1, %0;" :"=r"(z) :"r"(n));
     return z;
-    }else{
-        n >>= 32;
-        __asm__("bsf %1, %0;" :"=r"(z) :"r"(n));
-        return z + 32;
-    }
   }
 };
 template <typename T>
 struct ntz_impl<T, 4> {
   static size_t call(T n){
-    if (n == 0) return 64;
-    int z;
-    __asm__("bsf %1, %0;" :"=r"(z) :"r"(n));
+    if (n == 0) return 32;
+    size_t z;
+    __asm__ volatile ("bsf %1, %0;" :"=r"(z) :"r"(n));
     return z;
   }
 };
 template <typename T>
-inline size_t ntz(T bits) { return ntz_impl<T, sizeof(T)>::call(bits);}
+inline size_t ntz(T bits) {
+  return ntz_impl<T, sizeof(T)>::call(bits);}
 } // detail
 
 typedef size_t slot_size;
