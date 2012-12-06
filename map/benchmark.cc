@@ -55,7 +55,7 @@ void measure_speed(const std::string& name,TargetType& target, size_t num, eval_
 
 int main(void)
 {
-  for(int i =  100000; i <= 10000000; i += 100000){
+  for(int i =  100000; i <= 700000; i += 100000){
     for(int j =0; j<10; ++j){
       boost::unordered_map<int, int> bmap;
       Map<int, int> nmap;
@@ -66,6 +66,7 @@ int main(void)
 
       std::cout << "insert:" << std::endl;
       measure_speed("nanahan",nmap, i, insert);
+      /*
       measure_speed("boost  ",bmap, i, insert);
       measure_speed("tr1    ",tmap, i, insert);
       measure_speed("g_sparse",gsmap, i, insert);
@@ -84,6 +85,7 @@ int main(void)
       measure_speed("tr1    ",tmap, i, erase);
       measure_speed("g_sparse",gsmap, i, erase);
       measure_speed("g_dense",gdmap, i, erase);
+      */
     }
   }
 }

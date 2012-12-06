@@ -11,7 +11,6 @@ extern template class nanahan::Map<std::string, std::string>;
 extern template class nanahan::Map<bool, bool>;
 extern template class nanahan::Map<std::string, int>;
 extern template class nanahan::Map<std::string, uint32_t>;
-
 TEST(map, construct){
   nanahan::Map<int, int> m;
   nanahan::Map<uint64_t, std::string> n;
@@ -45,6 +44,24 @@ TEST(map, insert_one){
   ASSERT_EQ(m.find(2), m.end());
 }
 
+
+TEST(map, insert_one_string){
+  nanahan::Map<int, std::string> m;
+  {
+    std::pair<nanahan::Map<int, std::string>::iterator, bool> result =
+    m.insert(std::make_pair(8, "9"));
+    ASSERT_TRUE(result.second);
+    ASSERT_EQ(m.find(8)->first, 8);
+    ASSERT_EQ(m.find(8)->second, "9");
+  }
+  {
+    std::pair<nanahan::Map<int, std::string>::iterator, bool> result =
+      m.insert(std::make_pair(8, "10"));
+    ASSERT_FALSE(result.second);
+  }
+  ASSERT_EQ(m.find(2), m.end());
+}
+
 TEST(map, insert_many){
   nanahan::Map<int, int> m;
   for (int i = 1; i<8; i += 2){
@@ -57,7 +74,6 @@ TEST(map, insert_many){
     ASSERT_EQ(m.find(i+1)->second, (i+1)*(i+1));
   }
 }
-
 
 TEST(map, insert_eight){
   nanahan::Map<int, int> m;
@@ -92,21 +108,11 @@ TEST(map, insert_eight_string){
     ASSERT_EQ(m.find(std::string(orig))->second, i*i);
   }
 }
-
 TEST(map, bucket_extend){
   nanahan::Map<int, int> m;
   const int size = 100000;
   for (int i = 0; i<size; ++i){
     m.insert(std::make_pair(i, i*i));
-    /*
-      for (int j= 0; j < i; ++j){
-      if(m.find(j) == m.end()){
-        std::cout << "i = " << i <<
-          " not found :" << j <<std::endl;
-      }
-      ASSERT_NE(m.find(j), m.end());
-    }
-    */
   }
   //m.dump();
   for (int i = 0; i<size; ++i){
@@ -261,10 +267,6 @@ TEST(map, random_int){
         m.insert(std::make_pair(rand(), i));
       }
     }
-    /*
-    std::cout << "insert done" << std::endl;
-    m.dump();
-    //*/
     {
       boost::mt19937 gen( static_cast<unsigned long>(j) );
       boost::uniform_smallint<> dst( 0, 1 << 30 );
@@ -419,7 +421,7 @@ TEST(map, iterator)
   // dereference
   {
     map m;
-    std::pair<int const, int> p(1, 2);
+    std::pair<int, int> p(1, 2);
     m.insert(p);
 
     iterator it = m.begin();
@@ -443,12 +445,12 @@ TEST(map, iterator)
     iterator it = m.begin();
     EXPECT_EQ(3, (++it)->second);
     EXPECT_EQ(3, it++->second);
-    EXPECT_EQ((std::pair<const int, int>(3, 4)),*it++);
+    EXPECT_EQ((std::pair<int, int>(3, 4)),*it++);
 
     const_iterator cit = m.cbegin();
     EXPECT_EQ(3, (++cit)->second);
     EXPECT_EQ(3, cit++->second);
-    EXPECT_EQ((std::pair<const int, int>(3, 4)),*cit++);
+    EXPECT_EQ((std::pair<int, int>(3, 4)),*cit++);
   }
 
   // decrement
@@ -461,11 +463,11 @@ TEST(map, iterator)
     iterator it = m.end();
     EXPECT_EQ(4, (--it)->second);
     EXPECT_EQ(4, it--->second);
-    EXPECT_EQ((std::pair<const int, int>(2, 3)), *it--);
+    EXPECT_EQ((std::pair<int, int>(2, 3)), *it--);
 
     const_iterator cit = m.cend();
     EXPECT_EQ(4, (--cit)->second);
     EXPECT_EQ(4, cit--->second);
-    EXPECT_EQ((std::pair<const int, int>(2, 3)), *cit--);
+    EXPECT_EQ((std::pair<int, int>(2, 3)), *cit--);
   }
 }
