@@ -10,8 +10,8 @@
 //(setq compile-command "make -j2 test")
 
 //(setq c-basic-offset 2)
-const int thread_max = 3;
-const int thread_tries = 100;
+const int thread_max = 100;
+const int thread_tries = 10;
 pthread_barrier_t barrier;
 //using namespace std;
 using std::cout;
@@ -49,11 +49,17 @@ void* work(void* ptr) {
     random_sleep(&seed);
     s.push(thread_id + thread_max*i);
   }
+  random_sleep(&seed);
+  for(int i=0; i < tries; ++i){
+    random_sleep(&seed);
+    s.pop();
+  }
   return NULL;
 }
 
 bool invariant_check(stack& s) {
-  if(s.size() != thread_tries*thread_max){
+  //if(s.size() != thread_tries*thread_max){
+  if(s.size() != 0){
     cout << s << endl;
     std::cout << " size max actual: " << s.size()
               << " expected " <<thread_tries*thread_max << std::endl;
@@ -64,7 +70,7 @@ bool invariant_check(stack& s) {
 
 int main(int argc, char* argv[]){
   pthread_barrier_init(&barrier, NULL, thread_max);
-  int tries = 1000;
+  int tries = 1;
   std::cout << "thread:" << thread_max << std::endl
             << "each:" << thread_tries << std::endl
             << "try:" << tries << std::endl;
@@ -82,7 +88,7 @@ int main(int argc, char* argv[]){
       pthread_join(th[i], &result);
     }
     if(!invariant_check(s_)){
-      std::cout << ss.str() << std::endl;
+      std::cout << s_ << std::endl;
       return 1;
     }
   }
