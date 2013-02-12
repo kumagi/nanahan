@@ -10,8 +10,10 @@
 //(setq compile-command "make -j2 test")
 
 //(setq c-basic-offset 2)
-const int thread_max = 100;
-const int thread_tries = 10;
+const int thread_max = 1;
+const int thread_tries = 100;
+const int all_tries = 1;
+
 pthread_barrier_t barrier;
 //using namespace std;
 using std::cout;
@@ -38,10 +40,11 @@ void init() {
 void* work(void* ptr) {
   workingset* w = reinterpret_cast<workingset*>(ptr);
   stack& s = *w->s_;
-  int thread_id = w->i_am;
+  const int thread_id = w->i_am;
   unsigned int seed = w->seed_;
-  int tries = w->tries_;
+  const int tries = w->tries_;
   delete w;
+
   s.prepare();
   pthread_barrier_wait(&barrier);
 
@@ -49,10 +52,12 @@ void* work(void* ptr) {
     random_sleep(&seed);
     s.push(thread_id + thread_max*i);
   }
+  std::cout << "push done:" << s.size() << std::endl;
   random_sleep(&seed);
   for(int i=0; i < tries; ++i){
     random_sleep(&seed);
-    s.pop();
+    int result = s.pop();
+    std::cout << result << std::endl;
   }
   return NULL;
 }
@@ -70,11 +75,10 @@ bool invariant_check(stack& s) {
 
 int main(int argc, char* argv[]){
   pthread_barrier_init(&barrier, NULL, thread_max);
-  int tries = 1;
   std::cout << "thread:" << thread_max << std::endl
             << "each:" << thread_tries << std::endl
-            << "try:" << tries << std::endl;
-  for(unsigned int j = 0; j < 100; ++j) {
+            << "try:" << all_tries << std::endl;
+  for(unsigned int j = 0; j < all_tries; ++j) {
     std::stringstream ss;
 
     stack s_(thread_max, ss);
