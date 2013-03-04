@@ -16,6 +16,7 @@
 namespace nanahan {
 namespace detail {
 
+using namespace std;
 template <typename T>
 class concurrent_stack {
   typedef concurrent_stack<T> concurrent_stack_t;
@@ -47,13 +48,14 @@ public:
     pthread_mutex_lock(&lock_);
     if (stack_.empty()){
       pthread_mutex_unlock(&lock_);
-      throw std::logic_error("stack empty");
+      throw logic_error("stack empty");
     }
     T data = stack_.top();
     stack_.pop();
     pthread_mutex_unlock(&lock_);
+    return data;
   }
-  std::stack<T> stack_;
+  stack<T> stack_;
   pthread_mutex_t lock_;
 };
 
@@ -66,8 +68,18 @@ public:
     try {
       return inner_pool_.pop();
     }
-    catch (const std::logic_error& e){
+    catch (const logic_error& e){
       return new T(a1);
+    }
+  }
+
+  T* alloc() {
+    try {
+      return inner_pool_.pop();
+    }
+    catch (const logic_error& e){
+      //cout << "new T();" << endl;
+      return new T();
     }
   }
 
@@ -80,7 +92,7 @@ public:
       try {
         T* ptr = inner_pool_.pop();
         delete ptr;
-      } catch (const std::logic_error& e) {
+      } catch (const logic_error& e) {
         break; // do until empty
       }
     }
@@ -109,17 +121,18 @@ __thread int my_index = 0;
 /*
   concurrent wait-free stack
  */
+using namespace std;
 template <typename T>
 class Stack {
   typedef Stack<T> stack_t;
   struct node {
     T item_;
-    std::atomic<node*> next_;
-    std::atomic<int> winner_;
+    atomic<node*> next_;
+    atomic<int> winner_;
     node(const T& item)
-      :item_(item),next_(NULL), winner_(-1)
+      :item_(item),next_(NULL), winner_(0)
     {}
-    friend std::ostream& operator<<(std::ostream& os, const node& n) {
+    friend ostream& operator<<(ostream& os, const node& n) {
       os << "[item:" << n.item_
          << " next_:" << n.next_.load()
          << " winner:" << n.winner_.load() << "]";
@@ -128,44 +141,32 @@ class Stack {
   };
 
   struct state {
-    std::atomic<uint64_t> phase_;
-    std::atomic<bool> pending_;
+    uint64_t phase_;
+    bool pending_;
     bool push_;
     node* node_;
-    friend std::ostream& operator<<(std::ostream& os, const state& s) {
+    friend ostream& operator<<(ostream& os, const state& s) {
       os << "[phase:" << s.phase_
-         << " pending:" << s.pending_.load()
+         << " pending:" << s.pending_
          << " push:" << ((s.push_) ? "push" : "pop")
          << " node:" << s.node_ << "]";
       return os;
     }
-    bool is_pending() {
-      return pending_.load();
+    state(uint64_t phase, bool pending, bool push, node* node)
+      :phase_(phase), pending_(pending), push_(push), node_(node) {}
+    bool is_pending() const {
+      return pending_;
     }
-    void make_pending() {
-      bool _false = false;
-      bool _true = true;
-      pending_.compare_exchange_strong(_false, _true);
-      //pending_.store(true);
-    }
-    void make_unpend() {
-      bool _false = false;
-      bool _true = true;
-      pending_.compare_exchange_strong(_true, _false);
-      //pending_.store(false);
-    }
+
     state():phase_(0),pending_(false),push_(true),node_(NULL){}
   } __attribute__((aligned(CACHE_LINE)));
 public:
-  Stack(int m, std::ostream& os):head_(NULL), max_threads_(m),threads_(0), output_(os) {
-    state* new_states = new state[max_threads_ + 1];
+  Stack(int m, ostream& os):head_(NULL), max_threads_(m),threads_(0), output_(os) {
+    atomic<state*>* states = new atomic<state*>[max_threads_ + 1];
     for (int i = 0; i <= max_threads_; ++i) {
-      new_states[i].phase_.store(0);
-      new_states[i].make_unpend();
-      new_states[i].push_ = false;
-      new_states[i].node_ = NULL;
+      states[i].store(NULL);
     }
-    states_.store(new_states, std::memory_order_release);
+    states_ = states;
   }
   void prepare() {
     while(my_index == 0) {
@@ -176,28 +177,43 @@ public:
   void push(const T& item) {
     const uint64_t my_phase = max_phase() + 1;
     node* const new_node = node_pool_.alloc(item);
-    states_[my_index].phase_.store(my_phase);
-    states_[my_index].push_ = true;
-    states_[my_index].node_ = new_node;
-
-    states_[my_index].make_pending();
+    assert(new_node);
+    new_node->winner_ = 0;
+    state* const new_state = state_pool_.alloc();
+    assert(new_state);
+    new_state->phase_ = my_phase;
+    new_state->push_ = true;
+    new_state->pending_ = true;
+    new_state->node_ = new_node;
+    if (states_[my_index].load()){
+      state_pool_.dealloc(states_[my_index].load());
+    }
+    states_[my_index].store(new_state, memory_order_release);
 
     help(my_phase);
     finish();
-    assert(!states_[my_index].is_pending());
+
+    node* const next = new_node->next_;
+    if (next != NULL) {
+      next->winner_.compare_exchange_strong(my_index, 0);
+    }
+    //cout << my_index << ":pushed:" << item << endl;
+    assert(!(*states_[my_index]).is_pending());
   }
 
   void help_push(int tid, uint64_t phase) {
     do {
       node* old_head = head_.load();
-      node* pushing = states_[tid].node_;
-      node* old_next = pushing->next_.load();
-      if (old_head != head_.load()) { continue; }
+      state* const target = states_[tid].load(memory_order_acquire);
+      node* const pushing = target->node_;
+      if (old_head != head_.load()) {
+        continue;
+      }
       if (old_head == NULL) {
-        uint64_t old_phase = states_[tid].phase_.load();
+        const uint64_t old_phase = target->phase_;
         if (is_still_pending(tid, phase)) {
           if (head_.compare_exchange_strong(old_head, pushing)) {
-            states_[tid].make_unpend();
+            target->pending_ = false;
             break;
           }
         }
@@ -205,49 +221,63 @@ public:
       } else {
         int old_winner = old_head->winner_.load();
         if (old_head != head_.load()) { continue; }
-        if (old_winner != -1) { // some thread moving
+        if (old_winner != 0) { // some thread moving
           finish();
         } else {
           if (is_still_pending(tid, phase)) {
+            pushing->next_ = old_head;
             if (old_head->winner_.compare_exchange_strong(old_winner, tid)) {
-              //std::cout << "push!\n";
               finish();
             }
           }
         }
       }
-    } while (false);
+    } while (is_still_pending(tid, phase));
   }
 
   T pop() {
     const uint64_t my_phase = max_phase() + 1;
-    states_[my_index].push_ = false;
-    states_[my_index].node_ = NULL;
-    states_[my_index].phase_.store(my_phase);
+    state* const new_state = state_pool_.alloc();
+    new_state->phase_ = my_phase;
+    new_state->push_ = false;
+    new_state->pending_ = true;
+    new_state->node_ = NULL;
 
-    states_[my_index].make_pending();
-
+    if (states_[my_index].load() != NULL) {
+      state_pool_.dealloc(states_[my_index]);
+    }
+    states_[my_index] = new_state;
     help(my_phase);
     finish();
-    assert(!states_[my_index].is_pending());
-    if (states_[my_index].node_ == NULL) {
-      std::cerr << "error: stack empty" << std::endl;
+    assert(!(states_[my_index].load())->is_pending());
+    state* const finish = states_[my_index].load(memory_order_acquire);
+    if (finish->node_ == NULL) {
+      cerr << "error: stack empty" << endl;
       exit(1);
-      throw std::length_error("stack is empty");
+      throw length_error("stack is empty");
     }
-    T result(states_[my_index].node_->item_);
-
-    delete states_[my_index].node_;
+    T result(finish->node_->item_);
+    node_pool_.dealloc(finish->node_);
+    //cout << my_index <<":poped:" << result << endl;
     return result;
   }
 
   void help_pop(int tid, uint64_t phase){
     do {
       node* old_head = head_.load();
+      state* old_state = states_[tid].load();
       if (old_head == NULL) { // linelize point
         if (is_still_pending(tid, phase)) {
-          std::cerr << "emptyyyy!\n";
-          states_[tid].make_unpend();
+          state* const finished_state = state_pool_.alloc();
+          finished_state->phase_ = old_state->phase_;
+          finished_state->node_ = NULL;
+          finished_state->push_ = false;
+          finished_state->pending_ = false;
+          if (states_[tid].compare_exchange_strong(old_state, finished_state)) {
+            state_pool_.dealloc(old_state);
+          } else {
+            state_pool_.dealloc(finished_state);
+          }
           return;
         }
       }
@@ -255,6 +285,10 @@ public:
       int old_winner = old_head->winner_.load();
       if (old_head != head_.load()) { continue; }
       else {
+        if (old_winner != 0) {
+          std::cout << my_index <<": helping -> " << old_winner << std::endl;
+          finish();
+        }
         if (is_still_pending(tid, phase)) {
           if (head_.load()->winner_.compare_exchange_strong(old_winner, tid)) {
             finish();
@@ -265,13 +299,15 @@ public:
   }
 
   bool is_still_pending(int tid, uint64_t phase) {
-    return states_[tid].is_pending() && (states_[tid].phase_.load() <= phase);
+    const state* const target = states_[tid].load();
+    assert(target);
+    return target->pending_ && (target->phase_ <= phase);
   }
 
   void help(uint64_t phase) {
     int tid;
-    while((tid = scan(phase)) != -1) {
-      if (states_[tid].push_) {
+    while(tid = scan(phase)) {
+      if (states_[tid].load()->push_) {
         help_push(tid, phase);
       } else { // pop
         help_pop(tid, phase);
@@ -281,34 +317,43 @@ public:
 
   void finish() {
     // get winner thread and ensure finish it
-    node* old_head = head_.load(std::memory_order_acquire);
+    node* old_head = head_.load(memory_order_acquire);
     if (old_head == NULL) { return; }
     int tid = old_head->winner_.load();
-    if (tid == -1) { return; }
-    if (states_[tid].push_) { // push
-      node* next = states_[tid].node_;
-      if (old_head == head_.load(std::memory_order_acquire)) {
-        if (states_[tid].is_pending()) {
-          states_[tid].make_unpend();
+    if (tid == 0) { return; }
+    state* old_state = states_[tid].load();
+    if (old_state->push_) { // push
+      node* next = old_state->node_;
+      if (old_head != head_.load(memory_order_acquire)) return;
+      if (old_state->pending_) {
+        state* const finished_state = state_pool_.alloc();
+        finished_state->phase_ = old_state->phase_;
+        finished_state->pending_ = false;
+        finished_state->push_ = true;
+        finished_state->node_ = next;
+        if (states_[tid].compare_exchange_strong(old_state, finished_state)) {
+          state_pool_.dealloc(old_state);
+        } else {
+          state_pool_.dealloc(finished_state);
         }
-        states_[tid].node_->next_ = old_head;
-        head_.compare_exchange_strong(old_head, next);
       }
+      head_.compare_exchange_strong(old_head, next);
     } else { // pop
-      node* old_next = old_head->next_.load(std::memory_order_acquire);
-      std::cout << old_next << std::endl;
-      node** old_new_next = &states_[tid].node_->next_;
-      if (old_head != head_.load(std::memory_order_acquire)) { return; };
-      if (old_head != head_.load()) {
-        return;
+      node* old_next = old_head->next_.load(memory_order_acquire);
+      if (old_head != head_.load(memory_order_acquire)) { return; };
+      if (old_state->pending_) {
+        state* const finished_state = state_pool_.alloc();
+        finished_state->phase_ = old_state->phase_;
+        finished_state->pending_ = false;
+        finished_state->push_ = false;
+        finished_state->node_ = old_head;
+        if (states_[tid].compare_exchange_strong(old_state, finished_state)) {
+          state_pool_.dealloc(old_state);
+        } else {
+          state_pool_.dealloc(finished_state);
+        }
       }
-      uint64_t old_phase = states_[tid].phase_.load();
-      if (states_[tid].is_pending()) {
-        states_[tid].make_unpend();
-      }
-      states_[tid].node_->next_.compare_exchange_strong(old_new_next, old_head);
-      head_.compare_exchange_strong(old_head, states_[tid].node_);
-      old_head->winner_.compare_exchange_strong(tid, -1);
+      head_.compare_exchange_strong(old_head, old_next);
     }
   }
 
@@ -322,21 +367,21 @@ public:
     return result;
   }
 
-  friend std::ostream& operator<<(std::ostream& os, const stack_t& s) {
+  friend ostream& operator<<(ostream& os, const stack_t& s) {
     node* ptr = s.head_.load();
-    std::stringstream ss;
+    stringstream ss;
     ss << "Stack->";
-    std::vector<node*> ptrs; // for check loop
+    vector<node*> ptrs; // for check loop
     while(ptr != NULL) {
       ss << *ptr << "->";
       ptr = ptr->next_;
 
       // loop check
-      typename std::vector<node*>::iterator it =
-        std::find(ptrs.begin(), ptrs.end(), ptr);
+      typename vector<node*>::iterator it =
+        find(ptrs.begin(), ptrs.end(), ptr);
       if (it != ptrs.end()) {
         os << my_index << ":" << __func__ <<
-          "buffer looping!:" << ss.str() << "(LOOP) where " << *ptr << std::endl;
+          "buffer looping!:" << ss.str() << "(LOOP) where " << *ptr << endl;
         return os;
       }
       ptrs.push_back(ptr);
@@ -353,37 +398,45 @@ public:
       delete ptr;
       ptr = next;
     }
-    delete[] states_.load();
+    for (int i = 0; i < max_threads_; ++i) {
+      if (states_[i].load() != NULL) {
+        state_pool_.dealloc(states_[i].load());
+      }
+    }
   }
 private:
   uint64_t max_phase() const {
-    uint64_t max = 0;
-    for (int i = 0; i < max_threads_; ++i) {
-      if (!states_[i].is_pending()) { continue; }
-      max = std::max(max, states_[i].phase_.load());
+    uint64_t tmp_max_phase = 0;
+    for (int i = 1; i <= max_threads_; ++i) {
+      const state* const target = states_[i].load(memory_order_acquire);
+      if (target != NULL) {
+        tmp_max_phase = max(tmp_max_phase, target->phase_);
+      }
     }
-    return max;
+    return tmp_max_phase;
   }
   void dump_status() const {
+    cout << "dump_status();";
     for (int i = 0; i < max_threads_; ++i) {
-      std::cout << states_[i] << std::endl;
+      cout << states_[i] << endl;
     }
   }
   int scan(uint64_t less) {
-    for (int i = 0; i <= max_threads_; ++i) {
-      if (is_still_pending(i, less)) {
-        //output_ << my_index << ":" << __func__ << ":scaned tid:" << i << " is phase " << states_[i].phase_ << std::endl;
+    for (int i = 1; i <= max_threads_; ++i) {
+      if (states_[i] && is_still_pending(i, less)) {
+        //cout << my_index << ":" << __func__ << ":scaned tid:" << i << " is phase " << states_[i].load()->phase_ << endl;
         return i;
       }
     }
-    //output_ << my_index << ":" << __func__ << ": nothing to help" << std::endl;
-    return -1;
+    //output_ << my_index << ":" << __func__ << ": nothing to help" << endl;
+    return 0;
   }
-  std::atomic<node*> head_;
-  std::atomic<state*> states_;
+  atomic<node*> head_;
+  atomic<state*>* states_;
   int max_threads_;
   int threads_;
-  std::ostream& output_;
+  ostream& output_;
   detail::memory_pool<node> node_pool_;
+  detail::memory_pool<state> state_pool_;
 };
 }// namespace nanahan
