@@ -13,84 +13,84 @@
 
 
 namespace {
-const uint32_t CACHE_LINE = 64;
+  const uint32_t CACHE_LINE = 64;
 }
 
 class qsbr {
-	struct clock_chain {
-		boost::atomic<uint64_t> clock_;
-		clock_chain* next_;
-		char padding_[CACHE_LINE - sizeof(uint64_t) - sizeof(clock_chain*)];
+  struct clock_chain {
+    boost::atomic<uint64_t> clock_;
+    clock_chain* next_;
+    char padding_[CACHE_LINE - sizeof(uint64_t) - sizeof(clock_chain*)];
 
-		clock_chain(uint64_t clock, clock_chain* next)
-			:clock_(clock), next_(next) {}
-		void store_seq_cst(uint64_t c) {
-			clock_.store(c);
-		}
-	} __attribute__((aligned(64)));
+    clock_chain(uint64_t clock, clock_chain* next)
+      :clock_(clock), next_(next) {}
+    void store_seq_cst(uint64_t c) {
+      clock_.store(c);
+    }
+  } __attribute__((aligned(64)));
 
-	struct delete_pending_chain {
-		const uint64_t clock_;
-		delete_pending_chain* next_;
-		delete_pending_chain(uint64_t clk)
-			:clock_(clk), next_(NULL) { }
-	};
+  struct delete_pending_chain {
+    const uint64_t clock_;
+    delete_pending_chain* next_;
+    delete_pending_chain(uint64_t clk)
+      :clock_(clk), next_(NULL) { }
+  };
 public:
-	qsbr()
-		:head_(NULL),
+  qsbr()
+    :head_(NULL),
      pending_head_(NULL),
      center_clock_(1),
      chain_length_(0) {
-		pthread_key_create(&key_, NULL);//operator delete);
+    pthread_key_create(&key_, NULL);//operator delete);
     pthread_mutex_init(&deleting_lock_, NULL);
-	}
+  }
 
-	void set_active() {
-		clock_chain* local_clock_node =
-			reinterpret_cast<clock_chain*>(pthread_getspecific(key_));
-		if (!local_clock_node) {
+  void set_active() {
+    clock_chain* local_clock_node =
+      reinterpret_cast<clock_chain*>(pthread_getspecific(key_));
+    if (!local_clock_node) {
       local_clock_node = new_chain();
-		}
+    }
     uint64_t clk  = center_clock_.load();
-    std::cout << "a" << std::flush;
-		local_clock_node->store_seq_cst(center_clock_.load());
-	}
-	void set_quiescence() {
-		clock_chain* local_clock_node =
-			reinterpret_cast<clock_chain*>(pthread_getspecific(key_));
-		if (!local_clock_node) {
-			local_clock_node = new_chain();
-		}
-    std::cout << "q" << std::flush;
-		local_clock_node->store_seq_cst(0);
-	}
+    //std::cout << "a" << std::flush;
+    local_clock_node->store_seq_cst(center_clock_.load());
+  }
+  void set_quiescence() {
+    clock_chain* local_clock_node =
+      reinterpret_cast<clock_chain*>(pthread_getspecific(key_));
+    if (!local_clock_node) {
+      local_clock_node = new_chain();
+    }
+    //std::cout << "q" << std::flush;
+    local_clock_node->store_seq_cst(0);
+  }
 
-	template <typename T>
-	void safe_free(T* recipient) {
-		assert(sizeof(delete_pending_chain) <= sizeof(T));
-		recipient->~T();
+  template <typename T>
+  void safe_free(T* recipient) {
+    assert(sizeof(delete_pending_chain) <= sizeof(T));
+    recipient->~T();
     set_quiescence();
     center_clock_.fetch_add(1);
 
-		const uint64_t delete_timing = center_clock_.load();
-		delete_pending_chain* new_node
-			= new(recipient) delete_pending_chain(delete_timing);
-		while (true) {
-			delete_pending_chain* old_head = pending_head_.load();
-			new_node->next_ = old_head;
-			if (pending_head_.compare_exchange_strong(old_head, new_node)) {
-				break;
-			}
-		}
-		const uint64_t got_length = chain_length_.fetch_add(1);	 // increase length
+    const uint64_t delete_timing = center_clock_.load();
+    delete_pending_chain* new_node
+      = new(recipient) delete_pending_chain(delete_timing);
+    while (true) {
+      delete_pending_chain* old_head = pending_head_.load();
+      new_node->next_ = old_head;
+      if (pending_head_.compare_exchange_strong(old_head, new_node)) {
+        break;
+      }
+    }
+    const uint64_t got_length = chain_length_.fetch_add(1);  // increase length
 
-		if (32 < got_length) {
-			pthread_mutex_lock(&deleting_lock_);
+    if (32 < got_length) {
+      pthread_mutex_lock(&deleting_lock_);
       // dump();
       mb();
-			const uint64_t double_checked_length = chain_length_.load();
-			if (2 < double_checked_length) {
-				const uint64_t least_clock = scan_least_clock();
+      const uint64_t double_checked_length = chain_length_.load();
+      if (2 < double_checked_length) {
+        const uint64_t least_clock = scan_least_clock();
         // std::cout << "least_clock:" << least_clock << std::endl  << std::flush;
 
         // scan
@@ -99,13 +99,13 @@ public:
         ptr = ptr->next_;
         delete_pending_chain* decided_to_delete_chain = NULL;
         //dump();
-				while (ptr != NULL) {
+        while (ptr != NULL) {
           delete_pending_chain* const old_next = ptr->next_;
           if (ptr->clock_ < least_clock) {
             ptr->next_ = decided_to_delete_chain;
             decided_to_delete_chain = ptr;
             /*
-            std::cout << "delete :" << ptr << std::flush
+              std::cout << "delete :" << ptr << std::flush
               << "  clock was:" << ptr->clock_ << std::endl << std::flush;;
             */
             *prev_next = old_next;
@@ -113,19 +113,19 @@ public:
             prev_next = &ptr->next_;
           }
           /*
-          dump();
-          {
+            dump();
+            {
             delete_pending_chain* ptr = decided_to_delete_chain;
             std::cout << "decided to delete [head:" << ptr << "] -> " << std::flush;
             while (ptr) {
-              ptr = ptr->next_;
-              std::cout << "[" << ptr << "] -> " << std::flush;
+            ptr = ptr->next_;
+            std::cout << "[" << ptr << "] -> " << std::flush;
             }
             std::cout << "(NULL)" << std::endl;
-          }
+            }
           */
           ptr = old_next;
-				}
+        }
         *prev_next = NULL;
 
         // delete
@@ -138,20 +138,20 @@ public:
         }
         chain_length_.fetch_sub(delete_counter);
         //std::cout << "safety delete invoked:" << delete_counter << std::endl << std::flush;;
-			}
-			pthread_mutex_unlock(&deleting_lock_);
-		}
-	}
+      }
+      pthread_mutex_unlock(&deleting_lock_);
+    }
+  }
 
-	~qsbr() {
-    std::cout << "qsbr destructer" << std::endl  << std::flush;;
+  ~qsbr() {
+    //std::cout << "qsbr destructer" << std::endl  << std::flush;;
     {
       pthread_mutex_lock(&deleting_lock_);
       delete_pending_chain* ptr = pending_head_.load();
       while (ptr != NULL) {
         delete_pending_chain* const old_next = ptr->next_;
         operator delete(ptr);
-        std::cout << "~qsbr(): deleted :" << ptr << std::endl << std::flush;
+        // std::cout << "~qsbr(): deleted :" << ptr << std::endl << std::flush;
         ptr = old_next;
       }
       pthread_mutex_unlock(&deleting_lock_);
@@ -167,7 +167,7 @@ public:
       }
     }
     pthread_key_delete(key_);
-	}
+  }
 
   class ref_guard {
   public:
@@ -183,30 +183,30 @@ public:
   };
 
 private:
-	uint64_t scan_least_clock() const {
-		uint64_t least_clock = ~0;	// MAX
-		clock_chain* ptr = head_.load();
-		while (ptr != NULL) {
-			const uint64_t got_clock = ptr->clock_;
-			if (0 < got_clock && least_clock < got_clock) {
-				least_clock = got_clock;
-			}
-			ptr = ptr->next_;
-		}
-		return least_clock;
-	}
-	clock_chain* new_chain() {
-		clock_chain* new_clock = new clock_chain(0, NULL);
-		pthread_setspecific(key_, new_clock);
-		while(true) {
-			clock_chain* old_head = head_.load();
-			new_clock->next_ = old_head;
-			if (head_.compare_exchange_strong(old_head, new_clock)) {
-				break;
-			}
-		}
-		return new_clock;
-	}
+  uint64_t scan_least_clock() const {
+    uint64_t least_clock = ~0;  // MAX
+    clock_chain* ptr = head_.load();
+    while (ptr != NULL) {
+      const uint64_t got_clock = ptr->clock_;
+      if (0 < got_clock && least_clock < got_clock) {
+        least_clock = got_clock;
+      }
+      ptr = ptr->next_;
+    }
+    return least_clock;
+  }
+  clock_chain* new_chain() {
+    clock_chain* new_clock = new clock_chain(0, NULL);
+    pthread_setspecific(key_, new_clock);
+    while(true) {
+      clock_chain* old_head = head_.load();
+      new_clock->next_ = old_head;
+      if (head_.compare_exchange_strong(old_head, new_clock)) {
+        break;
+      }
+    }
+    return new_clock;
+  }
 
   void dump() const {
     if(0){
@@ -225,15 +225,15 @@ private:
         std::cout << "[" << ptr->clock_ << "|" << ptr->next_ << "] -> " << std::flush;;
         ptr = ptr->next_;
       }
-    std::cout << "(NULL)" << std::endl << std::flush;
+      std::cout << "(NULL)" << std::endl << std::flush;
     }
   }
 
-	boost::atomic<clock_chain*> head_;
-	boost::atomic<delete_pending_chain*> pending_head_;
-	boost::atomic<uint64_t> center_clock_;
+  boost::atomic<clock_chain*> head_;
+  boost::atomic<delete_pending_chain*> pending_head_;
+  boost::atomic<uint64_t> center_clock_;
 
-	pthread_mutex_t deleting_lock_;
-	boost::atomic<uint64_t> chain_length_;
-	pthread_key_t key_;
+  pthread_mutex_t deleting_lock_;
+  boost::atomic<uint64_t> chain_length_;
+  pthread_key_t key_;
 };

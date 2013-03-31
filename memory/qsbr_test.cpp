@@ -52,7 +52,6 @@ void* running(void* target) {
     hoge* delete_target = w->hoges_[w->index_];
     w->hoges_[w->index_] = NULL;
     w->q_->safe_free(delete_target);
-    std::cout << "d" << std::flush;
   }
   delete w;
 }
