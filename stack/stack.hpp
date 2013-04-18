@@ -10,13 +10,16 @@
 #include <stdexcept>
 #include <assert.h>
 
+#include "../memory/qsbr.hpp"
+
 //#include <relacy/relacy_std.hpp>
 
 #define CACHE_LINE 64
 namespace nanahan {
-namespace detail {
-
 using namespace std;
+
+namespace detail {
+/*
 template <typename T>
 class concurrent_stack {
   typedef concurrent_stack<T> concurrent_stack_t;
@@ -100,28 +103,29 @@ public:
 private:
   concurrent_stack<T*> inner_pool_;
 };
+*/
+
 } // detail
 
 template <typename T>
 bool compare_and_swap(T** target, T* expected, T* desired) {
   return __sync_bool_compare_and_swap_8(target,
-                                 reinterpret_cast<uint64_t>(expected),
-                                 reinterpret_cast<uint64_t>(desired));
+                                        reinterpret_cast<uint64_t>(expected),
+                                        reinterpret_cast<uint64_t>(desired));
 }
 bool compare_and_swap(uint64_t* target, uint64_t expected, uint64_t desired) {
   return __sync_bool_compare_and_swap_8(target,
                                         expected,
                                         desired);
 }
-#define mb() asm volatile("":::"memory");
+//#define mb() asm volatile("":::"memory");
 
 
 __thread int my_index = 0;
 
 /*
   concurrent wait-free stack
- */
-using namespace std;
+*/
 template <typename T>
 class Stack {
   typedef Stack<T> stack_t;
@@ -134,8 +138,8 @@ class Stack {
     {}
     friend ostream& operator<<(ostream& os, const node& n) {
       os << "[item:" << n.item_
-         << " next_:" << n.next_.load()
-         << " winner:" << n.winner_.load() << "]";
+        << " next_:" << n.next_.load()
+        << " winner:" << n.winner_.load() << "]";
       return os;
     }
   };
@@ -147,25 +151,23 @@ class Stack {
     node* node_;
     friend ostream& operator<<(ostream& os, const state& s) {
       os << "[phase:" << s.phase_
-         << " pending:" << s.pending_
-         << " push:" << ((s.push_) ? "push" : "pop")
-         << " node:" << s.node_ << "]";
+        << " pending:" << s.pending_
+        << " push:" << ((s.push_) ? "push" : "pop")
+        << " node:" << s.node_ << "]";
       return os;
     }
     state(uint64_t phase, bool pending, bool push, node* node)
       :phase_(phase), pending_(pending), push_(push), node_(node) {}
-    bool is_pending() const {
-      return pending_;
-    }
 
     state():phase_(0),pending_(false),push_(true),node_(NULL){}
   } __attribute__((aligned(CACHE_LINE)));
 public:
-  Stack(int m, ostream& os):head_(NULL), max_threads_(m),threads_(0), output_(os) {
+  Stack(int m, ostream& os):head_(NULL), max_threads_(m),threads_(1), output_(os) {
     atomic<state*>* states = new atomic<state*>[max_threads_ + 1];
     for (int i = 0; i <= max_threads_; ++i) {
       states[i].store(NULL);
     }
+    asm volatile("" : : : "memory");
     states_ = states;
   }
   void prepare() {
@@ -175,18 +177,17 @@ public:
   }
 
   void push(const T& item) {
+    assert(my_index != 0);
+    qsbr::ref_guard g(qsbr_);
     const uint64_t my_phase = max_phase() + 1;
-    node* const new_node = node_pool_.alloc(item);
+    node* const new_node = new node(item);
     assert(new_node);
     new_node->winner_ = 0;
-    state* const new_state = state_pool_.alloc();
+    state* const new_state = new state(my_phase, true, true, new_node);
     assert(new_state);
-    new_state->phase_ = my_phase;
-    new_state->push_ = true;
-    new_state->pending_ = true;
-    new_state->node_ = new_node;
+
     if (states_[my_index].load()){
-      state_pool_.dealloc(states_[my_index].load());
+      qsbr_.safe_free(states_[my_index].load());
     }
     states_[my_index].store(new_state, memory_order_release);
 
@@ -198,26 +199,27 @@ public:
       next->winner_.compare_exchange_strong(my_index, 0);
     }
     //cout << my_index << ":pushed:" << item << endl;
-    assert(!(*states_[my_index]).is_pending());
+    asm volatile("" : : : "memory");
+    //assert(!states_[my_index].load(std::memory_order_seq_cst)->pending_);
+    assert(!is_still_pending(my_index, my_phase));
   }
 
   void help_push(int tid, uint64_t phase) {
     do {
       node* old_head = head_.load();
-      state* const target = states_[tid].load(memory_order_acquire);
-      node* const pushing = target->node_;
+      state* help = states_[tid].load();
+      node* const pushing = help->node_;
       if (old_head != head_.load()) {
         continue;
       }
       if (old_head == NULL) {
-        const uint64_t old_phase = target->phase_;
+        const uint64_t old_phase = help->phase_;
         if (is_still_pending(tid, phase)) {
           if (head_.compare_exchange_strong(old_head, pushing)) {
-            target->pending_ = false;
+            help->pending_ = false;
             break;
           }
         }
-        continue;
       } else {
         int old_winner = old_head->winner_.load();
         if (old_head != head_.load()) { continue; }
@@ -225,7 +227,6 @@ public:
           finish();
         } else {
           if (is_still_pending(tid, phase)) {
-            pushing->next_ = old_head;
             if (old_head->winner_.compare_exchange_strong(old_winner, tid)) {
               finish();
             }
@@ -236,20 +237,22 @@ public:
   }
 
   T pop() {
+    assert(my_index != 0);
+    qsbr::ref_guard g(qsbr_);
     const uint64_t my_phase = max_phase() + 1;
-    state* const new_state = state_pool_.alloc();
+    state* const new_state = new state();
     new_state->phase_ = my_phase;
     new_state->push_ = false;
     new_state->pending_ = true;
     new_state->node_ = NULL;
 
     if (states_[my_index].load() != NULL) {
-      state_pool_.dealloc(states_[my_index]);
+      qsbr_.safe_free(states_[my_index].load());
     }
     states_[my_index] = new_state;
     help(my_phase);
     finish();
-    assert(!(states_[my_index].load())->is_pending());
+    assert(!(states_[my_index].load())->pending_);
     state* const finish = states_[my_index].load(memory_order_acquire);
     if (finish->node_ == NULL) {
       cerr << "error: stack empty" << endl;
@@ -257,8 +260,9 @@ public:
       throw length_error("stack is empty");
     }
     T result(finish->node_->item_);
-    node_pool_.dealloc(finish->node_);
+    qsbr_.safe_free(finish->node_);
     //cout << my_index <<":poped:" << result << endl;
+    assert(!is_still_pending(my_index, my_phase));
     return result;
   }
 
@@ -268,15 +272,15 @@ public:
       state* old_state = states_[tid].load();
       if (old_head == NULL) { // linelize point
         if (is_still_pending(tid, phase)) {
-          state* const finished_state = state_pool_.alloc();
+          state* const finished_state = new state();
           finished_state->phase_ = old_state->phase_;
           finished_state->node_ = NULL;
           finished_state->push_ = false;
           finished_state->pending_ = false;
           if (states_[tid].compare_exchange_strong(old_state, finished_state)) {
-            state_pool_.dealloc(old_state);
+            qsbr_.safe_free(old_state);
           } else {
-            state_pool_.dealloc(finished_state);
+            delete finished_state;
           }
           return;
         }
@@ -295,7 +299,7 @@ public:
           }
         }
       }
-    } while(false);
+    } while(is_still_pending(tid, phase));
   }
 
   bool is_still_pending(int tid, uint64_t phase) {
@@ -321,36 +325,38 @@ public:
     if (old_head == NULL) { return; }
     int tid = old_head->winner_.load();
     if (tid == 0) { return; }
-    state* old_state = states_[tid].load();
+    state* old_state = states_[tid].load(memory_order_acquire);
     if (old_state->push_) { // push
-      node* next = old_state->node_;
+      node* const next = old_state->node_;
       if (old_head != head_.load(memory_order_acquire)) return;
       if (old_state->pending_) {
-        state* const finished_state = state_pool_.alloc();
+        state* const finished_state = new state();
         finished_state->phase_ = old_state->phase_;
         finished_state->pending_ = false;
         finished_state->push_ = true;
         finished_state->node_ = next;
         if (states_[tid].compare_exchange_strong(old_state, finished_state)) {
-          state_pool_.dealloc(old_state);
+          qsbr_.safe_free(old_state);
         } else {
-          state_pool_.dealloc(finished_state);
+          delete finished_state;
         }
       }
+      node* expected_next = NULL;
+      next->next_.compare_exchange_strong(expected_next, old_head);
       head_.compare_exchange_strong(old_head, next);
     } else { // pop
       node* old_next = old_head->next_.load(memory_order_acquire);
       if (old_head != head_.load(memory_order_acquire)) { return; };
       if (old_state->pending_) {
-        state* const finished_state = state_pool_.alloc();
+        state* const finished_state = new state();
         finished_state->phase_ = old_state->phase_;
         finished_state->pending_ = false;
         finished_state->push_ = false;
         finished_state->node_ = old_head;
         if (states_[tid].compare_exchange_strong(old_state, finished_state)) {
-          state_pool_.dealloc(old_state);
+          qsbr_.safe_free(old_state);
         } else {
-          state_pool_.dealloc(finished_state);
+          delete finished_state;
         }
       }
       head_.compare_exchange_strong(old_head, old_next);
@@ -390,17 +396,16 @@ public:
     return os;
   }
 
-
   ~Stack() {
     node* ptr = head_.load();
     while(ptr != NULL) {
       node* next = ptr->next_;
-      delete ptr;
+      qsbr_.safe_free(ptr);
       ptr = next;
     }
     for (int i = 0; i < max_threads_; ++i) {
       if (states_[i].load() != NULL) {
-        state_pool_.dealloc(states_[i].load());
+        qsbr_.safe_free(states_[i].load());
       }
     }
   }
@@ -436,7 +441,6 @@ private:
   int max_threads_;
   int threads_;
   ostream& output_;
-  detail::memory_pool<node> node_pool_;
-  detail::memory_pool<state> state_pool_;
+  qsbr qsbr_;
 };
 }// namespace nanahan

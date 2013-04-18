@@ -11,9 +11,9 @@
 
 //(setq c-basic-offset 2)
 
-const int thread_max = 2;
-const int thread_tries = 10000;
-const int all_tries = 100;
+const int thread_max = 10;
+const int thread_tries = 10;
+const int all_tries = 1;
 
 pthread_barrier_t barrier;
 //using namespace std;
@@ -23,7 +23,7 @@ using std::endl;
 typedef nanahan::Stack<int> stack;
 
 inline void random_sleep(unsigned int* seed){
-  usleep(((rand_r(seed) % 10) + 1)*10);
+  usleep(((rand_r(seed) % 100) + 1)*10);
 }
 
 struct workingset {
@@ -90,11 +90,13 @@ int main(int argc, char* argv[]){
       void* result;
       pthread_join(th[i], &result);
     }
-    std::cout << "finish" << std::endl;
+    std::cout << "finish. checking..";
     if(!invariant_check(s_)){
-      std::cout << s_ << std::endl;
       return 1;
     }
+    std::cout <<"ok." << std::endl;
   }
+
+  std::cout << "all finish" << std::endl;
   return 0;
 }

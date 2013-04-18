@@ -37,7 +37,7 @@ void* running(void* target) {
   {
     qsbr::ref_guard g(*w->q_);
     uint64_t sum = 0;
-    for (int i=w->num_; 0 <= i; --i) {
+    for (int i=num; 0 <= i; --i) {
       const int index = (my_index + i) % hoges.size();
       if (hoges[index]) {
         mb();
@@ -54,6 +54,7 @@ void* running(void* target) {
     w->q_->safe_free(delete_target);
   }
   delete w;
+  return NULL;
 }
 
 int main() {

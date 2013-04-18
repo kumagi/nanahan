@@ -12,15 +12,15 @@
 #define mb() asm volatile("" : : : "memory")
 
 
-namespace {
-  const uint32_t CACHE_LINE = 64;
+namespace detail {
+const uint32_t QSBR_CACHE_LINE = 64u;
 }
 
 class qsbr {
   struct clock_chain {
     boost::atomic<uint64_t> clock_;
     clock_chain* next_;
-    char padding_[CACHE_LINE - sizeof(uint64_t) - sizeof(clock_chain*)];
+    char padding_[detail::QSBR_CACHE_LINE - sizeof(uint64_t) - sizeof(clock_chain*)];
 
     clock_chain(uint64_t clock, clock_chain* next)
       :clock_(clock), next_(next) {}
@@ -32,7 +32,7 @@ class qsbr {
   struct delete_pending_chain {
     const uint64_t clock_;
     delete_pending_chain* next_;
-    delete_pending_chain(uint64_t clk)
+    explicit delete_pending_chain(uint64_t clk)
       :clock_(clk), next_(NULL) { }
   };
 public:
@@ -51,8 +51,6 @@ public:
     if (!local_clock_node) {
       local_clock_node = new_chain();
     }
-    uint64_t clk  = center_clock_.load();
-    //std::cout << "a" << std::flush;
     local_clock_node->store_seq_cst(center_clock_.load());
   }
   void set_quiescence() {
@@ -85,61 +83,67 @@ public:
     const uint64_t got_length = chain_length_.fetch_add(1);  // increase length
 
     if (32 < got_length) {
-      pthread_mutex_lock(&deleting_lock_);
-      // dump();
-      mb();
-      const uint64_t double_checked_length = chain_length_.load();
-      if (2 < double_checked_length) {
-        const uint64_t least_clock = scan_least_clock();
-        // std::cout << "least_clock:" << least_clock << std::endl  << std::flush;
+      const int lock_fail = pthread_mutex_trylock(&deleting_lock_);
+      if (lock_fail == 0) {
+        dump();
+        mb();
+        const uint64_t double_checked_length = chain_length_.load();
+        if (2 < double_checked_length) {
+          const uint64_t least_clock = scan_least_clock();
+          std::cout << "least_clock:"
+            << least_clock
+            << std::endl  << std::flush;
 
-        // scan
-        delete_pending_chain* ptr = pending_head_.load()->next_;
-        delete_pending_chain** prev_next = &ptr->next_;
-        ptr = ptr->next_;
-        delete_pending_chain* decided_to_delete_chain = NULL;
-        //dump();
-        while (ptr != NULL) {
-          delete_pending_chain* const old_next = ptr->next_;
-          if (ptr->clock_ < least_clock) {
-            ptr->next_ = decided_to_delete_chain;
-            decided_to_delete_chain = ptr;
-            /*
+          // scan
+          delete_pending_chain* ptr = pending_head_.load()->next_;
+          delete_pending_chain** prev_next = &ptr->next_;
+          ptr = ptr->next_;
+          delete_pending_chain* decided_to_delete_chain = NULL;
+          dump();
+          while (ptr != NULL) {
+            delete_pending_chain* const old_next = ptr->next_;
+            if (ptr->clock_ < least_clock) {
+              ptr->next_ = decided_to_delete_chain;
+              decided_to_delete_chain = ptr;
+              //*
               std::cout << "delete :" << ptr << std::flush
-              << "  clock was:" << ptr->clock_ << std::endl << std::flush;;
-            */
-            *prev_next = old_next;
-          } else {
-            prev_next = &ptr->next_;
-          }
-          /*
+                << "  clock was:" << ptr->clock_ << std::endl << std::flush;;
+              //*/
+              *prev_next = old_next;
+            } else {
+              prev_next = &ptr->next_;
+            }
+            //*
             dump();
             {
-            delete_pending_chain* ptr = decided_to_delete_chain;
-            std::cout << "decided to delete [head:" << ptr << "] -> " << std::flush;
-            while (ptr) {
-            ptr = ptr->next_;
-            std::cout << "[" << ptr << "] -> " << std::flush;
+              delete_pending_chain* ptr = decided_to_delete_chain;
+              std::cout << "decided to delete [head:" << ptr << "] -> " << std::flush;
+              while (ptr) {
+                ptr = ptr->next_;
+                std::cout << "[" << ptr << "] -> " << std::flush;
+              }
+              std::cout << "(NULL)" << std::endl;
             }
-            std::cout << "(NULL)" << std::endl;
-            }
-          */
-          ptr = old_next;
-        }
-        *prev_next = NULL;
+            //*/
+            ptr = old_next;
+          }
+          *prev_next = NULL;
 
-        // delete
-        uint64_t delete_counter = 0;
-        while (decided_to_delete_chain) {
-          delete_pending_chain* next = decided_to_delete_chain->next_;
-          operator delete(decided_to_delete_chain);
-          decided_to_delete_chain = next;
-          ++delete_counter;
+          // delete
+          uint64_t delete_counter = 0;
+          while (decided_to_delete_chain) {
+            delete_pending_chain* next = decided_to_delete_chain->next_;
+            operator delete(decided_to_delete_chain);
+            decided_to_delete_chain = next;
+            ++delete_counter;
+          }
+          chain_length_.fetch_sub(delete_counter);
+          std::cout << "safety delete invoked:"
+            << delete_counter
+            << std::endl << std::endl << std::flush;;
         }
-        chain_length_.fetch_sub(delete_counter);
-        //std::cout << "safety delete invoked:" << delete_counter << std::endl << std::flush;;
+        pthread_mutex_unlock(&deleting_lock_);
       }
-      pthread_mutex_unlock(&deleting_lock_);
     }
   }
 
@@ -155,6 +159,7 @@ public:
         ptr = old_next;
       }
       pthread_mutex_unlock(&deleting_lock_);
+      pthread_mutex_destroy(&deleting_lock_);
     }
 
     {
