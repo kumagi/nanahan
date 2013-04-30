@@ -27,16 +27,40 @@ class qsbr {
     clock_chain(uint64_t clock, clock_chain* next)
       :clock_(clock), next_(next) {}
     void store_seq_cst(uint64_t c) {
-      clock_.store(c);
+      clock_.store(c, boost::memory_order_seq_cst);
     }
   } __attribute__((aligned(64)));
 
+  class base_ptr {
+  public:
+    virtual ~base_ptr() throw() {}
+    virtual void release() = 0;
+  };
+
+  template <typename T>
+  class scoped_ptr : public base_ptr {
+  public:
+    scoped_ptr(T* p) : ptr_(p) {}
+    void release() {
+      delete ptr_;
+    }
+  private:
+    T* ptr_;
+  };
+
   struct delete_pending_chain {
     const uint64_t clock_;
+    base_ptr* ptr_;
     delete_pending_chain* next_;
-    explicit delete_pending_chain(uint64_t clk)
-      :clock_(clk), next_(NULL) { }
+    template<typename T>
+    delete_pending_chain(uint64_t clk, T* ptr)
+      :clock_(clk), ptr_(new scoped_ptr<T>(ptr)), next_(NULL) { }
+    ~delete_pending_chain() {
+      ptr_->release();
+      delete ptr_;
+    }
   };
+
 public:
   qsbr()
     :head_(NULL),
@@ -74,62 +98,25 @@ public:
         const uint64_t double_checked_length = chain_length_.load();
         if (32 < double_checked_length) {
           const uint64_t least_clock = scan_least_clock();
-          /*
-          std::cout << "least_clock:"
-            << least_clock
-            << std::endl  << std::flush;
-          */
-          // scan
-          delete_pending_chain* ptr = pending_head_.load(boost::memory_order_seq_cst)->next_;
+          delete_pending_chain* ptr =
+            pending_head_.load(boost::memory_order_seq_cst)->next_;
           delete_pending_chain** prev_next = &ptr->next_;
           ptr = ptr->next_;
-          delete_pending_chain* decided_to_delete_chain = NULL;
-          //dump();
+          uint64_t delete_counter = 0;
           while (ptr != NULL) {
             delete_pending_chain* const old_next = ptr->next_;
             if (ptr->clock_ < least_clock) {
-              ptr->next_ = decided_to_delete_chain;
-              decided_to_delete_chain = ptr;
-              /*
-              std::cout << "delete :" << ptr << std::flush
-                << "  clock was:" << ptr->clock_ << std::endl << std::flush;;
-              //*/
+              ++delete_counter;
+              delete ptr;
               *prev_next = old_next;
             } else {
-              std::cout << "undelete :" << ptr << std::flush
-                << "  clock was:" << ptr->clock_ << std::endl << std::flush;;
               prev_next = &ptr->next_;
             }
-            /*
-            //dump();
-            {
-              delete_pending_chain* ptr = decided_to_delete_chain;
-              std::cout << "decided to delete [head:" << ptr << "] -> " << std::flush;
-              while (ptr) {
-                ptr = ptr->next_;
-                std::cout << "[" << ptr << "] -> " << std::flush;
-              }
-              std::cout << "(NULL)" << std::endl;
-            }
-            //*/
             ptr = old_next;
           }
           *prev_next = NULL;
 
-          // delete
-          uint64_t delete_counter = 0;
-          while (decided_to_delete_chain) {
-            delete_pending_chain* next = decided_to_delete_chain->next_;
-            operator delete(decided_to_delete_chain);
-            decided_to_delete_chain = next;
-            ++delete_counter;
-          }
           chain_length_.fetch_sub(delete_counter);
-          /*
-          std::cout << "safety delete invoked:"
-            << delete_counter
-            << std::endl << std::endl << std::flush;
-          */
         }
         pthread_mutex_unlock(&deleting_lock_);
       } else if (lock_result == EBUSY) {
@@ -142,16 +129,16 @@ public:
     }
   }
 
+  struct safe_delete_stack{
+    void* ptr_;
+    safe_delete_stack* next_;
+  };
   template <typename T>
-  void safe_free(T* recipient) {
-    assert(sizeof(delete_pending_chain) <= sizeof(T));
-    recipient->~T();
-
+  void safe_free(T* const recipient) {
     const uint64_t delete_timing =
       center_clock_.fetch_add(1) + 1;  // increase clock
-    mb();
     delete_pending_chain* new_node
-      = new(recipient) delete_pending_chain(delete_timing);
+      = new delete_pending_chain(delete_timing, recipient);
     mb();
     for (;;) {  // cas loop for pushing chain
       delete_pending_chain* old_head = pending_head_.load();
@@ -170,7 +157,7 @@ public:
       delete_pending_chain* ptr = pending_head_.load();
       while (ptr != NULL) {
         delete_pending_chain* const old_next = ptr->next_;
-        operator delete(ptr);
+        delete ptr;
         // std::cout << "~qsbr(): deleted :" << ptr << std::endl << std::flush;
         ptr = old_next;
       }
@@ -193,7 +180,7 @@ public:
   class ref_guard {
   public:
     ref_guard(qsbr& target)
-      :target_(&target)  {
+        :target_(&target)  {
       target_->set_active();
     }
     ~ref_guard() {
