@@ -1,5 +1,5 @@
 CXX=g++
-CXXFLAGS=-ggdb -O0 -Wno-deprecated -std=gnu++0x -march=x86-64 -fno-inline
+CXXFLAGS=-ggdb -O0 -std=gnu++0x -march=x86-64 -fno-inline
 LDFLAGS=-lpthread -lstdc++
 
 target:test

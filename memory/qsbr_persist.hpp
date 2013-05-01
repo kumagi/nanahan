@@ -50,7 +50,7 @@ class qsbr {
 
   struct delete_pending_chain {
     const uint64_t clock_;
-    base_ptr* ptr_;
+    base_ptr* const ptr_;
     delete_pending_chain* next_;
     template<typename T>
     delete_pending_chain(uint64_t clk, T* ptr)
@@ -179,10 +179,12 @@ public:
 
   class ref_guard {
   public:
+    inline
     ref_guard(qsbr& target)
         :target_(&target)  {
       target_->set_active();
     }
+    inline
     ~ref_guard() {
       target_->set_quiescence();
       target_->attemt_delete();

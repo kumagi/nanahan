@@ -11,11 +11,14 @@
 
 //(setq c-basic-offset 2)
 
-const int thread_max = 10;
+const int thread_max = 20;
 const int thread_tries = 10;
+
 const int all_tries = 1;
 
 pthread_barrier_t barrier;
+pthread_mutex_t mp_lock;
+
 //using namespace std;
 using std::cout;
 using std::endl;
@@ -31,8 +34,8 @@ struct workingset {
   int i_am;
   unsigned int seed_;
   int tries_;
-  workingset(stack* s, int i, unsigned int seed, int tries)
-  :s_(s), i_am(i), seed_(seed), tries_(tries){}
+workingset(stack* s, int i, unsigned int seed, int tries)
+:s_(s), i_am(i), seed_(seed), tries_(tries){}
 };
 
 void init() {
@@ -46,17 +49,25 @@ void* work(void* ptr) {
   const int tries = w->tries_;
   delete w;
 
-  s.prepare();
   pthread_barrier_wait(&barrier);
+  pthread_mutex_lock(&mp_lock);
+  std::stringstream ss;
+  ss << "[" << "i" << s.get_index() << "]";
+  std::cout << ss.str();
+  pthread_mutex_unlock(&mp_lock);
 
-  for(int i=0; i < tries; ++i){
+  try {
+    for(int i=0; i < tries; ++i){
+      random_sleep(&seed);
+      s.push(thread_id + thread_max*i);
+    }
     random_sleep(&seed);
-    s.push(thread_id + thread_max*i);
-  }
-  random_sleep(&seed);
-  for(int i=0; i < tries; ++i){
-    random_sleep(&seed);
-    int result = s.pop();
+    for(int i=0; i < tries; ++i){
+      random_sleep(&seed);
+      int result = s.pop();
+    }
+  } catch (...) {
+    std::cout << "invalid!!!" << std::endl;
   }
   return NULL;
 }
@@ -74,6 +85,7 @@ bool invariant_check(const stack& s) {
 
 int main(int argc, char* argv[]){
   pthread_barrier_init(&barrier, NULL, thread_max);
+  pthread_mutex_init(&mp_lock, NULL);
   std::cout << "thread:" << thread_max << std::endl
             << "each:" << thread_tries << std::endl
             << "try:" << all_tries << std::endl;

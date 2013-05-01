@@ -1,7 +1,6 @@
-#include "qsbr.hpp"
+#include "qsbr_persist.hpp"
 #include <pthread.h>
 #include <vector>
-#define mb() asm volatile("" : : : "memory")
 
 struct hoge{
   uint64_t foo;
