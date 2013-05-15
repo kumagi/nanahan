@@ -8,7 +8,6 @@
 #include <assert.h>
 
 //(setq compile-command "make -j2 test")
-
 //(setq c-basic-offset 2)
 
 const int thread_max = 20;
@@ -49,25 +48,29 @@ void* work(void* ptr) {
   const int tries = w->tries_;
   delete w;
 
-  pthread_barrier_wait(&barrier);
   pthread_mutex_lock(&mp_lock);
   std::stringstream ss;
   ss << "[" << "i" << s.get_index() << "]";
   std::cout << ss.str();
   pthread_mutex_unlock(&mp_lock);
+  pthread_barrier_wait(&barrier);
+
 
   try {
-    for(int i=0; i < tries; ++i){
+    for(int i=0; i < tries; ++i) {
       random_sleep(&seed);
-      s.push(thread_id + thread_max*i);
+      s.push(thread_id * tries + i);
     }
     random_sleep(&seed);
-    for(int i=0; i < tries; ++i){
+    for(int i=0; i < tries; ++i) {
       random_sleep(&seed);
       int result = s.pop();
+      std::cerr << " " << result << std::flush;
     }
   } catch (...) {
     std::cout << "invalid!!!" << std::endl;
+    usleep(50000);
+    exit(1);
   }
   return NULL;
 }
@@ -106,7 +109,7 @@ int main(int argc, char* argv[]){
     if(!invariant_check(s_)){
       return 1;
     }
-    std::cout <<"ok." << std::endl;
+    std::cout <<"stack empty." << std::endl;
   }
 
   std::cout << "all finish" << std::endl;

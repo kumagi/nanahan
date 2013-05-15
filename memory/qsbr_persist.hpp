@@ -85,7 +85,6 @@ public:
     if (!local_clock_node) {
       local_clock_node = new_chain();
     }
-    //std::cout << "q" << std::flush;
     local_clock_node->store_seq_cst(0);
   }
 
@@ -170,7 +169,6 @@ public:
       while (ptr) {
         clock_chain* next = ptr->next_;
         delete ptr;
-        //std::cout << "~qsbr(): chain_node deleted :" << ptr << std::endl;
         ptr = next;
       }
     }
