@@ -24,6 +24,7 @@ TEST(map, is_empty){
   for (int i = 0; i<1000; ++i){
     ASSERT_EQ(m.find(i), m.end());
   }
+  ASSERT_TRUE(m.sanity_check());
 }
 
 
@@ -32,13 +33,15 @@ TEST(map, insert_one){
   {
     std::pair<nanahan::Map<int, int>::iterator, bool> result =
     m.insert(std::make_pair(8, 9));
+    ASSERT_TRUE(m.sanity_check());
     ASSERT_TRUE(result.second);
-    ASSERT_EQ(m.find(8)->first, 8);
-    ASSERT_EQ(m.find(8)->second, 9);
+    ASSERT_EQ(8, m.find(8)->first);
+    ASSERT_EQ(9, m.find(8)->second);
   }
   {
     std::pair<nanahan::Map<int, int>::iterator, bool> result =
       m.insert(std::make_pair(8, 9));
+    ASSERT_TRUE(m.sanity_check());
     ASSERT_FALSE(result.second);
   }
   ASSERT_EQ(m.find(2), m.end());
@@ -50,6 +53,7 @@ TEST(map, insert_one_string){
   {
     std::pair<nanahan::Map<int, std::string>::iterator, bool> result =
     m.insert(std::make_pair(8, "9"));
+    ASSERT_TRUE(m.sanity_check());
     ASSERT_TRUE(result.second);
     ASSERT_EQ(m.find(8)->first, 8);
     ASSERT_EQ(m.find(8)->second, "9");
@@ -57,6 +61,7 @@ TEST(map, insert_one_string){
   {
     std::pair<nanahan::Map<int, std::string>::iterator, bool> result =
       m.insert(std::make_pair(8, "10"));
+    ASSERT_TRUE(m.sanity_check());
     ASSERT_FALSE(result.second);
   }
   ASSERT_EQ(m.find(2), m.end());
@@ -66,6 +71,7 @@ TEST(map, insert_many){
   nanahan::Map<int, int> m;
   for (int i = 1; i<8; i += 2){
     m.insert(std::make_pair(i, i*i));
+    ASSERT_TRUE(m.sanity_check());
   }
   for (int i = 0; i<8; i += 2){
     ASSERT_EQ(m.find(i), m.end());
@@ -79,6 +85,7 @@ TEST(map, insert_eight){
   nanahan::Map<int, int> m;
   for (int i = 0; i<8; ++i){
     m.insert(std::make_pair(i, i*i));
+    ASSERT_TRUE(m.sanity_check());
   }
   //m.dump();
   for (int i = 0; i<8; ++i){
@@ -95,6 +102,8 @@ TEST(map, insert_eight_string){
     orig[2] = i + '0';
     orig[4] = i + '0';
     m.insert(std::make_pair(std::string(orig), i*i));
+    std::cout << "inserted " << orig << std::endl;
+    ASSERT_TRUE(m.sanity_check());
     //m.dump();
   }
   //m.dump();
@@ -110,12 +119,14 @@ TEST(map, insert_eight_string){
 }
 TEST(map, bucket_extend){
   nanahan::Map<int, int> m;
-  const int size = 100000;
-  for (int i = 0; i<size; ++i){
+  const int size = 10000;
+  for (int i = 0; i < size; ++i){
     m.insert(std::make_pair(i, i*i));
+    if ((i & 7) == 0) {
+      ASSERT_TRUE(m.sanity_check());
+    }
   }
-  //m.dump();
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     ASSERT_NE(m.find(i), m.end());
     ASSERT_EQ(m.find(i)->first, i);
     ASSERT_EQ(m.find(i)->second, i*i);
@@ -126,12 +137,15 @@ TEST(map, erase){
   nanahan::Map<int, int> m;
   std::pair<nanahan::Map<int,int>::iterator, bool> result =
     m.insert(std::make_pair(8, 9));
+  ASSERT_TRUE(m.sanity_check());
   ASSERT_NE(m.find(8), m.end());
   ASSERT_EQ(m.find(8)->first, 8);
   ASSERT_EQ(m.find(8)->second, 9);
   ASSERT_EQ(m.find(2), m.end());
-  //result.first.dump();
+  m.dump();
   m.erase(result.first);
+  m.dump();
+  ASSERT_TRUE(m.sanity_check());
   ASSERT_EQ(m.find(8), m.end());
 }
 
@@ -139,13 +153,15 @@ TEST(map, erase){
 TEST(map, erase_many){
   nanahan::Map<int, int> m;
   const int size = 1000;
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     m.insert(std::make_pair(i, i*i));
+    ASSERT_TRUE(m.sanity_check());
   }
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     m.erase(m.find(i));
+    ASSERT_TRUE(m.sanity_check());
   }
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     ASSERT_EQ(m.find(i), m.end());
   }
 }
@@ -153,13 +169,15 @@ TEST(map, erase_many){
 TEST(map, erase_half){
   nanahan::Map<int, int> m;
   const int size = 10000;
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     m.insert(std::make_pair(i, i*i));
+    ASSERT_TRUE(m.sanity_check());
   }
-  for (int i = 0; i<size; i += 2){
+  for (int i = 0; i < size; i += 2){
     m.erase(m.find(i));
+    ASSERT_TRUE(m.sanity_check());
   }
-  for (int i = 0; i<size; i += 2){
+  for (int i = 0; i < size; i += 2){
     ASSERT_EQ(m.find(i), m.end());
     ASSERT_NE(m.find(i+1), m.end());
     ASSERT_EQ(m.find(i+1)->first, i+1);
@@ -172,12 +190,14 @@ TEST(map, erase_half_string){
   const uint32_t size = 200;
   char buff[8] = {};
   memcpy(buff, "buff", 4);
-  for (uint32_t i = 0; i<size; ++i){
+  for (uint32_t i = 0; i < size; ++i){
     memcpy(&buff[4], &i, 4);
+    //std::cout << "insert:" << i << std::endl;
     m.insert(std::make_pair(std::string(buff), i));
+    ASSERT_TRUE(m.sanity_check());
   }
   //m.dump();
-  for (uint32_t i = 0; i<size; i += 2){
+  for (uint32_t i = 0; i < size; i += 2){
     memcpy(&buff[4], &i, 4);
     m.erase(m.find(std::string(buff)));
     // if(m.erase(m.find(std::string(buff))) == m.end()){
@@ -187,7 +207,7 @@ TEST(map, erase_half_string){
     // }
   }
   //m.dump();
-  for (uint32_t i = 0; i<size; i += 2){
+  for (uint32_t i = 0; i < size; i += 2){
     memcpy(&buff[4], &i, 4);
     ASSERT_EQ(m.find(std::string(buff)), m.end());
 
@@ -202,9 +222,10 @@ TEST(map, erase_half_string){
 TEST(map, size){
   nanahan::Map<int, int> m;
   const size_t size = 10000;
-  for (size_t i = 0; i<size; ++i){
+  for (size_t i = 0; i < size; ++i){
     ASSERT_EQ(m.size(), i);
     m.insert(std::make_pair(i, i*i));
+    ASSERT_TRUE(m.sanity_check());
     ASSERT_EQ(m.size(), i+1);
   }
 }
@@ -213,6 +234,7 @@ TEST(map, not_empty){
   nanahan::Map<int, int> m;
   ASSERT_TRUE(m.empty());
   m.insert(std::make_pair(2, 3));
+  ASSERT_TRUE(m.sanity_check());
   ASSERT_FALSE(m.empty());
 }
 
@@ -255,8 +277,9 @@ TEST(bitcount, 64){
 }
 TEST(map, random_int){
   const int size = 4000;
-  const int tries = 1000;
+  const int tries = 10;  // more and more!
   for(int j = 0; j < tries; ++j){
+    std::cout << "trying seed:" << j << std::endl;
     nanahan::Map<int, int> m;
     {
       boost::mt19937 gen( static_cast<unsigned long>(j) );
@@ -265,8 +288,10 @@ TEST(map, random_int){
                                > rand( gen, dst );
       for(int i = 0; i < size; ++i){
         m.insert(std::make_pair(rand(), i));
+        ASSERT_TRUE(m.sanity_check());
       }
     }
+
     {
       boost::mt19937 gen( static_cast<unsigned long>(j) );
       boost::uniform_smallint<> dst( 0, 1 << 30 );
@@ -283,39 +308,45 @@ TEST(map, random_int){
 TEST(operator, copy){
   nanahan::Map<int, int> m, o;
   const int size = 10000;
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     m.insert(std::make_pair(i, i*i));
+    ASSERT_TRUE(m.sanity_check());
   }
   o = m;
-  for (int i = 0; i<size; i += 2){
+  ASSERT_TRUE(m.sanity_check());
+  ASSERT_TRUE(o.sanity_check());
+  for (int i = 0; i < size; i += 2){
+    // remove even number in m
+    // deep copied o must not be related
     m.erase(m.find(i));
+    ASSERT_TRUE(m.sanity_check());
   }
-  for (int i = 0; i<size; i += 2){
+  for (int i = 0; i < size; i += 2){
     ASSERT_EQ(m.find(i), m.end());
     ASSERT_NE(m.find(i+1), m.end());
     ASSERT_EQ(m.find(i+1)->first, i+1);
     ASSERT_EQ(m.find(i+1)->second, (i+1)*(i+1));
 
-    ASSERT_NE(o.find(i), o.end());
-    ASSERT_EQ(o.find(i)->first, i);
-    ASSERT_EQ(o.find(i)->second, i*i);
-    ASSERT_NE(o.find(i+1), o.end());
-    ASSERT_EQ(o.find(i+1)->first, i+1);
-    ASSERT_EQ(o.find(i+1)->second, (i+1)*(i+1));
+    ASSERT_NE(o.end(), o.find(i));
+    ASSERT_EQ(i, o.find(i)->first);
+    ASSERT_EQ(i*i, o.find(i)->second);
+    ASSERT_NE(o.end(), o.find(i+1));
+    ASSERT_EQ(i+1, o.find(i+1)->first);
+    ASSERT_EQ((i+1)*(i+1), o.find(i+1)->second);
   }
 }
 
 TEST(copy, construct){
   nanahan::Map<int, int> m;
   const int size = 10000;
-  for (int i = 0; i<size; ++i){
+  for (int i = 0; i < size; ++i){
     m.insert(std::make_pair(i, i*i));
   }
   nanahan::Map<int, int> o(m);
-  for (int i = 0; i<size; i += 2){
+  for (int i = 0; i < size; i += 2){
     m.erase(m.find(i));
   }
-  for (int i = 0; i<size; i += 2){
+  for (int i = 0; i < size; i += 2){
     ASSERT_EQ(m.find(i), m.end());
     ASSERT_NE(m.find(i+1), m.end());
     ASSERT_EQ(m.find(i+1)->first, i+1);

@@ -13,16 +13,17 @@
 //#define mb() asm volatile("" : : : "memory")
 #define mb() __asm__ __volatile__ ("mfence":::"memory");
 
+namespace nanahan {
 
 namespace detail {
-const uint32_t QSBR_CACHE_LINE = 64u;
+const uint32_t NANAHAN_QSBR_CACHE_LINE = 64u;
 }
 
 class qsbr {
   struct clock_chain {
     boost::atomic<uint64_t> clock_;
     clock_chain* next_;
-    char padding_[detail::QSBR_CACHE_LINE - sizeof(uint64_t) - sizeof(clock_chain*)];
+    char padding_[detail::NANAHAN_QSBR_CACHE_LINE - sizeof(uint64_t) - sizeof(clock_chain*)];
 
     clock_chain(uint64_t clock, clock_chain* next)
       :clock_(clock), next_(next) {}
@@ -79,6 +80,7 @@ public:
     }
     local_clock_node->store_seq_cst(center_clock_.load());
   }
+
   void set_quiescence() {
     clock_chain* local_clock_node =
       reinterpret_cast<clock_chain*>(pthread_getspecific(key_));
@@ -132,6 +134,7 @@ public:
     void* ptr_;
     safe_delete_stack* next_;
   };
+
   template <typename T>
   void safe_free(T* const recipient) {
     const uint64_t delete_timing =
@@ -207,7 +210,7 @@ private:
   clock_chain* new_chain() {
     clock_chain* new_clock = new clock_chain(0, NULL);
     pthread_setspecific(key_, new_clock);
-    while(true) {
+    while (true) {
       clock_chain* old_head = head_.load();
       new_clock->next_ = old_head;
       if (head_.compare_exchange_strong(old_head, new_clock)) {
@@ -218,7 +221,7 @@ private:
   }
 
   void dump() const {
-    if(0){
+    if (0) {
       const clock_chain* ptr = head_.load();
       std::cout << "clock_chain[head: "<< ptr << "] -> ";
       while (ptr) {
@@ -246,3 +249,5 @@ private:
   boost::atomic<uint64_t> chain_length_;
   pthread_key_t key_;
 };
+
+}  // namespace nanahan

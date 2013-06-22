@@ -1,5 +1,5 @@
-#ifndef MAP_HPP
-#define MAP_HPP
+#ifndef NANAHAN_MAP_HPP_
+#define NANAHAN_MAP_HPP_
 //#include <cstdint>
 #include <stdint.h>
 #include <cstddef>
@@ -13,7 +13,10 @@
 #include <iterator>
 #include <iostream>
 
-namespace nanahan{
+
+// (setq compile-command "make")
+
+namespace nanahan {
 using boost::hash;
 //using std::hash;
 
@@ -42,22 +45,25 @@ struct bitcount_impl<T, 8> {
   }
 };
 template <typename T>
-inline size_t bitcount(T bits) { return bitcount_impl<T, sizeof(T)>::call(bits); }
+inline size_t bitcount(T bits) {
+  return bitcount_impl<T, sizeof(T)>::call(bits);
+}
 
 template <typename T, size_t N>
 struct ntz_impl;
 template <typename T>
 struct ntz_impl<T, 8> {
-  static size_t call(T n){
+  static size_t call(T n) {
     if (n == 0) return 64;
     size_t z;
     __asm__ volatile ("bsf %1, %0;" :"=r"(z) :"r"(n));
     return z;
   }
 };
+
 template <typename T>
 struct ntz_impl<T, 4> {
-  static size_t call(T n){
+  static size_t call(T n) {
     if (n == 0) return 32;
     size_t z;
     __asm__ volatile ("bsf %1, %0;" :"=r"(z) :"r"(n));
@@ -67,7 +73,17 @@ struct ntz_impl<T, 4> {
 
 template <typename T>
 inline size_t ntz(T bits) {
-  return ntz_impl<T, sizeof(T)>::call(bits);}
+  return ntz_impl<T, sizeof(T)>::call(bits);
+}
+
+static std::string to_bitarray(uint64_t num, size_t size) {
+  std::string result = "";
+  while(num > 0 || result.length() < size) {
+    result = (num & 1) == 0 ? ("0" + result) : ("1" + result);
+    num >>= 1;
+  }
+  return result;
+}
 } // detail
 
 typedef size_t slot_size;
@@ -79,63 +95,101 @@ template<typename Key,
          typename Pred = std::equal_to<Key>,
          typename Alloc = std::allocator<std::pair<Key, Value> >
          >
-class Map{
+class Map {
 private:
   typedef Map<Key,Value,Hash,Pred,Alloc> ThisMap;
   typedef slot_size Slot;
   static const size_t INITIAL_SIZE = 8;
-  static const size_t SLOTSIZE = sizeof(Slot) * 4 - 1;
+  static const size_t SLOTSIZE = sizeof(Slot) * 2 - 1;
   static const size_t HOP_RANGE = SLOTSIZE * 8;
   typedef typename std::pair<Key, Value> Kvp;
-  struct bucket{
+  struct bucket {
 #define kvp_ (*reinterpret_cast<Kvp*>(storage_))
 #define ckvp_ (*reinterpret_cast<const Kvp*>(storage_))
     bucket()
       :slot_(0) {}
-    void dump()const{
-      std::cout << "slot[" << get_slot() << "] ";
+    void dump() const {
+      std::cout << "slot[" << detail::to_bitarray(get_slot(), SLOTSIZE) << "] "
+        << std::flush;
       if (is_empty()) {
         std::cout << "<empty>";
       }else{
         std::cout << "(" << ckvp_.first << "=>" << ckvp_.second << ")";
       }
     }
-    bool is_empty()const{ return (slot_ & 1) == 0;}
-    Kvp& get_kvp(){ return kvp_;}
-    const Kvp& get_kvp()const{ return ckvp_;}
-    void set_kvp(const Kvp& kvp){
-      new(&kvp_) Kvp(kvp);
-      slot_ |= 1;
-    }
-    void delete_kvp(){
-      kvp_.~Kvp();
-      slot_ &= ~1;
-    }
-    void swap(bucket& target){
-      if(target.slot_ & slot_ & 1){
-        std::swap(kvp_, *reinterpret_cast<Kvp*>(target.storage_));
-        bool target_is_not_empty = target.slot_ & 1;
-        target.slot_ = (target.slot_ & ~1) | (slot_ & 1);
-        slot_ = (slot_ & ~1) | target_is_not_empty;
-      }else if(target.slot_ & 1){
-        target.slot_ &= ~1;
-        slot_ |= 1;
-        std::memcpy(storage_, target.storage_, sizeof(Kvp));
-      }else{
-        slot_ &= ~1;
-        target.slot_ |= 1;
-        std::memcpy(target.storage_, storage_, sizeof(Kvp));
+    friend std::ostream& operator<<(std::ostream& ost, const bucket& b) {
+      ost << "slot[" << detail::to_bitarray(b.get_slot(), SLOTSIZE) << "] "
+        << std::flush;
+      if (b.is_empty()) {
+        ost << "<empty>";
+      } else {
+        //*
+        ost << "(" << b.get_kvp().first <<
+          "=>" << b.get_kvp().second << ")";
+        //*/
       }
+      return ost;
+    }
+    bool is_empty() const {
+      return (slot_ & 1) == 0;
+    }
+    Kvp& get_kvp() { return kvp_;}
+    const Kvp& get_kvp() const {
+      return ckvp_;
+    }
+    void set_kvp(const Kvp& kvp) {
+      new(&kvp_) Kvp(kvp);
     }
 
-    void set_slot_bit(int pos) { slot_ |= one << (pos+1); }
-    void drop_slot_bit(int pos) { slot_ &= ~(one << (pos+1)); }
-    void clear_slot() { slot_ = 0; }
-    Slot get_slot() const { return slot_ >> 1; }
-    void set_slot_explicit(Slot slot) { slot_ = slot << 1 | (slot_ & 1); }
+    void delete_kvp() {
+      kvp_.~Kvp();
+    }
+
+    //*
+    void swap(bucket& target) {
+      if (target.slot_ & slot_ & 1) {
+        std::swap(kvp_, *reinterpret_cast<Kvp*>(target.storage_));
+      } else if (target.slot_ & 1) {
+        std::memcpy(storage_, target.storage_, sizeof(Kvp));
+        std::memset(target.storage_, 0, sizeof(Kvp));
+      } else {
+        std::memcpy(target.storage_, storage_, sizeof(Kvp));
+        std::memset(storage_, 0, sizeof(Kvp));
+      }
+    }
+    //*/
+
+    void set_slot_bit(int pos) {
+      assert(!(slot_ & one << (pos + 1)));
+      /*std::cout << "before: " << detail::to_bitarray(slot_, SLOTSIZE)
+        << " and set " << pos << std::endl;
+      //*/
+      slot_ |= one << (pos + 1);
+      /*
+      std::cout << "after : " << detail::to_bitarray(slot_, SLOTSIZE) << std::endl;
+      //*/
+    }
+    void use_slot() {
+      assert((slot_ & 1) == 0);
+      slot_ |= 1;
+    }
+    void unuse_slot() {
+      assert((slot_ & 1) == 1);
+      slot_ &= ~one;
+    }
+    void drop_slot_bit(int pos) {
+      slot_ &= ~(one << (pos + 1));
+    }
+    void clear_slot() {
+      slot_ = 0;
+    }
+
+    Slot get_slot() const {
+      return slot_ >> 1;
+    }
 #undef kvp_
   private:
-    Slot slot_; // slot_ & 1 means this kvp_ is used,
+    Slot slot_; // slot_ & 1 means this kvp_ is used by itself
     char storage_[sizeof(Kvp)] __attribute__((aligned(sizeof(Kvp))));
   };
   static typename Alloc::template rebind<bucket>::other bucket_alloc;
@@ -196,7 +250,7 @@ private:
       it_->dump();
     }
 
-    void remove_unsafe(){
+    void remove_unsafe() {
       it_->kvp_ = NULL;
     }
 
@@ -278,10 +332,52 @@ public:
      used_size_(0),
      dont_destroy_elements_(false)
   {
-    for(size_t i = 0; i < bucket_size_; ++i){ buckets_[i].clear_slot(); }
+    for (size_t i = 0; i < bucket_size_; ++i) {
+      buckets_[i].clear_slot();
+    }
   }
-  /*
-  Map(const ThisMap& orig)
+
+  bool sanity_check() const {
+    for (size_t i = 0; i < bucket_size_; ++i) {
+      Slot slot_info = buckets_[i].get_slot();
+      const bucket* target_bucket = buckets_ + i;
+      while (slot_info) {
+        if ((slot_info & 1)) {
+          assert(target_bucket);
+          const Kvp kvp = target_bucket->get_kvp();
+          if (locate(Hash()(kvp.first), 0) != i) {
+            std::cout << "error at bucket[" << i << "]"
+              " value should be slot[" << locate(Hash()(kvp.first), 0) << "]"
+              << std::endl
+              << " slot_info:" << detail::to_bitarray(slot_info, SLOTSIZE)
+              << " bucket:" << *target_bucket
+              << std::endl;
+            dump();
+            return false;
+          }
+        } else {
+          if (!target_bucket->is_empty()) {
+            const Kvp kvp = target_bucket->get_kvp();
+            if (locate(Hash()(kvp.first), 0) == i) {
+              std::cout << "error at bucket[" << i << "]" << std::flush
+                << " value should not be slot[" << locate(Hash()(kvp.first), 0) << "]"
+                << std::endl
+                << " slot_info:" << detail::to_bitarray(slot_info, SLOTSIZE)
+                << " bucket:" << *target_bucket
+                << std::endl;
+              dump();
+              return false;
+            }
+          }
+        }
+        slot_info >>= 1;
+        target_bucket = next(target_bucket);
+      }
+    }
+    return true;
+  }
+
+  Map(const ThisMap& orig)  // deep copy
     :bucket_size_(orig.bucket_size_),
      buckets_(reinterpret_cast<bucket*>(malloc(sizeof(bucket)*bucket_size_))),
      used_size_(0),
@@ -289,22 +385,23 @@ public:
   {
     try {
       const_iterator it = orig.begin();
-      for(; it != orig.end(); ++it){
+      for (; it != orig.end(); ++it) {
         insert(*it);
       }
+      sanity_check();
     } catch (...) {
       destroy_elements();
       free(buckets_);
       // must throw
     }
   }
-  */
-  Map& operator=(const Map& orig){
+
+  Map& operator=(const Map& orig) {
     Map cp(orig);
     this->swap(cp);
     return *this;
   }
-  void swap(Map &other){
+  void swap(Map &other) {
     std::swap(allocator_, other.allocator_);
     std::swap(bucket_size_, other.bucket_size_);
     std::swap(buckets_, other.buckets_);
@@ -312,27 +409,27 @@ public:
     std::swap(dont_destroy_elements_, other.dont_destroy_elements_);
   }
   template<typename T>
-  bool operator==(const T& rhs)const{
+  bool operator==(const T& rhs) const {
     {
       const_iterator it = begin();
-      for(; it != end(); ++it){
+      for (; it != end(); ++it) {
         typename T::const_iterator result = rhs.find(it->first);
-        if (result == rhs.end()){
+        if (result == rhs.end()) {
           return false;
         }
-        if (result->second != it->second){
+        if (result->second != it->second) {
           return false;
         }
       }
     }
     {
       typename T::const_iterator it = rhs.begin();
-      for(; it != rhs.end(); ++it){
+      for (; it != rhs.end(); ++it) {
         const_iterator result = find(it->first);
-        if (result == rhs.end()){
+        if (result == rhs.end()) {
           return false;
         }
-        if (result->second != it->second){
+        if (result->second != it->second) {
           return false;
         }
       }
@@ -340,72 +437,79 @@ public:
     return true;
   }
   template <typename T>
-  bool operator!=(const T& rhs)const{ return !this->operator==(rhs);}
+  bool operator!=(const T& rhs) const {
+    return !this->operator==(rhs);
+  }
+
   /* insert with std::pair */
   inline std::pair<iterator, bool> insert(const std::pair<Key, Value>& kvp)
   {
     const size_t hashvalue = Hash()(kvp.first);
     const size_t target_slot = locate(hashvalue, 0);
     //std::cout << "target slot:" << target_slot << std::endl;
-    bucket* target_bucket = buckets_ + target_slot;
+    bucket* const target_bucket = buckets_ + target_slot;
     iterator searched = find(kvp.first, hashvalue);
-    if (!searched.is_end()){
+    if (!searched.is_end()) {
       return std::make_pair(const_iterator_to_iterator(searched), false);
     }
 
-    /* search empty bucket until max_distance*/
+    /* seaerch empty bucket until max_distance */
     bucket* empty_bucket = target_bucket;
     size_t distance = 0;
     size_t index = target_slot;
     const size_t bucket_size_minus_one = bucket_size_ - 1;
     const size_t max_distance = (HOP_RANGE < bucket_size_ ?
                                  HOP_RANGE : bucket_size_);
-    do{
+    do {
       if (empty_bucket->is_empty()) break;
       index = (index + 1) & bucket_size_minus_one;
       empty_bucket = &buckets_[index];
       ++distance;
-    }while (distance < max_distance);
+    } while (distance < max_distance);
 
-    if (max_distance <= distance){
+    if (max_distance <= distance) {
       bucket_extend();
       return insert(kvp);
     }
 
+    if (10000 < distance) {
+      std::cout << "slot from:" << target_slot
+        << " and dist:" << distance << std::endl;
+    }
+
     /* move empty bucket if it was too far */
-    while (empty_bucket != NULL && SLOTSIZE <= distance){
+    while (empty_bucket != NULL && SLOTSIZE <= distance) {
       /*
-      std::cout << "find closer bucket:" << 
+      std::cout << "find closer bucket:" <<
         " " << distance << " => ";
       //*/
       swap_to_closer_bucket(&empty_bucket, &distance);
-      //std::cout << distance << std::endl;
+      // std::cout << distance << std::endl;
     }
+    sanity_check();
 
-    if(empty_bucket == NULL){
-      std::cout << "not...found...,," << std::endl;
-      dump();
-      std::cout << "key:"<< kvp.first << " value:" << kvp.second
-                << " target_slot:" << target_slot << std::endl; 
+    if (empty_bucket == NULL || !empty_bucket->is_empty()) {
+      bucket_extend();
+      return insert(kvp);
     }
-
 
     assert(empty_bucket->is_empty());
 
     //std::cout << "dist:" << distance << std::endl;
     empty_bucket->set_kvp(kvp);
+    empty_bucket->use_slot();
+    target_bucket->set_slot_bit(distance);
+
     /*
       std::cout << "first:" << empty_bucket->get_kvp().first << std::endl
               << "second:" << empty_bucket->get_kvp().second << std::endl;
-    */
-    target_bucket->set_slot_bit(distance);
+    //*/
     ++used_size_;
     assert(used_size_ <= bucket_size_);
-    //dump();
     return std::make_pair(iterator(empty_bucket, buckets_, bucket_size_),
                           true);
   }
-  void bucket_extend(){
+  void bucket_extend() {
     const size_t old_size = bucket_size_;
     size_t new_size = old_size * 2;
     //std::cout << "resize from " << used_size_ << " of "
@@ -415,29 +519,32 @@ public:
       used_size_ << " / " << bucket_size_ << "\t| " <<
       static_cast<double>(used_size_) * 100 / bucket_size_ << " %" << std::endl;
     //*/
-    while (true){
+    while (true) {
       Map new_map(new_size);
       new_map.dont_destroy_elements_ = true;
       bool ok = true;
       iterator end_it = end();
-      for(iterator it = begin(); it != end_it; ++it){
+      for (iterator it = begin(); it != end_it; ++it) {
         const bool result = new_map.insert_unsafe(&*it);
-        if (!result){ // failed to insert
+        if (!result) { // failed to insert
           //std::cout << "failed to insert_unsafe()" << std::endl;
           ok = false;
           break;
         }
       }
-      if (!ok){
+      if (!ok) {
         new_size *= 2;
         continue;
-      }else{
+      } else {
         /*
           std::cout << "old map" << std::endl;
           dump();
           std::cout << "to move map" << std::endl;
           new_map.dump();
+          std::cout << "extend " << bucket_size_
+          <<" -> " << new_map.bucket_size_ << std::endl;
         //*/
+
 
         std::swap(buckets_, new_map.buckets_);
         bucket_size_ = new_size;
@@ -459,24 +566,25 @@ public:
   {
     bucket* const target = where.it_;
     bucket* start_bucket = target;
-    if (where.is_end()){
+    if (where.is_end()) {
       //std::cout << "erase: end() passed"<< std::endl;
       return;
     }
     if (find(where->first).is_end()) return;
 
     target->delete_kvp();
-    for(Slot i = 1; i != 0; i <<= 1){
-      if ((start_bucket->get_slot() & i) != 0){
+    target->unuse_slot();
+    for (Slot i = 0; i < SLOTSIZE; ++i) {
+      if (start_bucket->get_slot() & (one << i)) {
         --used_size_;
         /* delete from slotinfo */
-        start_bucket->set_slot_explicit(start_bucket->get_slot() & ~i);
+        start_bucket->drop_slot_bit(i);
         return;
       }
       --start_bucket;
       start_bucket += start_bucket < buckets_ ? bucket_size_ : 0;
     }
-    //std::cout << "erased:" << std::endl;
+    std::cout << "failed to erase" << std::endl;
   }
 
   iterator find(const Key& key) {
@@ -495,21 +603,21 @@ private:
   const_iterator find(const Key& key, const size_t hashvalue) const
   {
     const size_t target = locate(hashvalue, 0);
-    bucket *target_bucket = buckets_ + target;
+    bucket *target_bucket = &buckets_[target];
     Slot slot_info = target_bucket->get_slot();
     /*
     std::cout << "search:[" << target << "] for " << key <<std::endl;
     //*/
     Pred pred; // comperator
-    while (slot_info){
+    while (slot_info) {
       /*
       std::cout << "trying " << slot_info << " ";
       target_bucket->dump();
       std::cout << std::endl;
       //*/
-      if ((slot_info & 1)){
+      if ((slot_info & 1)) {
         assert(target_bucket);
-        if (!target_bucket->is_empty() && pred(target_bucket->get_kvp().first, key)){
+        if (!target_bucket->is_empty() && pred(target_bucket->get_kvp().first, key)) {
           return iterator(target_bucket, buckets_, bucket_size_);
         }
         slot_info &= ~one;
@@ -526,27 +634,33 @@ private:
   inline void swap_to_closer_bucket(bucket** free_bucket, size_t* distance)
   {
     bucket* move_bucket = *free_bucket - SLOTSIZE + 1;
-    if (move_bucket < buckets_){
+    if (move_bucket < buckets_) {
       move_bucket += bucket_size_;
     }
     //std::cout << "distance:" << *distance << " ";
-    for(size_t i = SLOTSIZE - 1; 0 < i; --i, move_bucket = next(move_bucket)){
-      for(size_t j = 0; j < i; ++j){
-        if (move_bucket->get_slot() & (one << j)){
+    for (size_t i = SLOTSIZE - 1; 0 < i; --i, move_bucket = next(move_bucket)) {
+      for (size_t j = 0; j < i; ++j) {
+        if (move_bucket->get_slot() & (one << j)) {
           /*
           std::cout << "moving from " << j << " to " << i << " bucket ";
           bucket_index(move_bucket, j).dump();
           std::cout  << std::endl;
           //*/
+          bucket* const new_free_bucket = &bucket_index(move_bucket, j);
           (*free_bucket)->swap(bucket_index(move_bucket,j));
+          (*free_bucket)->use_slot();
+          new_free_bucket->unuse_slot();
           move_bucket->drop_slot_bit(j);
           move_bucket->set_slot_bit(i);
           *free_bucket = &bucket_index(move_bucket,j);
           *distance -= i - j;
           return;
+        } else {
+          // std::cout << " " << i;
         }
       }
     }
+    //std::cout << "oh my god..." << std::endl;
     *free_bucket = NULL;
     *distance = 0;
   }
@@ -565,45 +679,52 @@ public:
   }
   const_iterator cbegin() const {
     bucket* head = buckets_;
-    while (head->is_empty() && head != &buckets_[bucket_size_]){++head;}
+    while (head->is_empty() && head != &buckets_[bucket_size_]) {
+      ++head;
+    }
     return const_iterator(head, buckets_, bucket_size_);
   }
   const_iterator cend() const {
     return const_iterator(&buckets_[bucket_size_], buckets_, bucket_size_);
   }
 
-  size_t size()const{return used_size_;}
-  bool empty()const{return used_size_ == 0;}
-  void dump()const{
-    for(size_t i=0; i < bucket_size_; ++i){
-      std::cout << "[" << i << "] ";
-      buckets_[i].dump();
-      std::cout << std::endl;
+  size_t size() const {return used_size_;}
+  bool empty() const {return used_size_ == 0;}
+  void dump() const {
+    for (size_t i=0; i < bucket_size_; ++i) {
+      std::cout << "[" << i << "] " << std::flush
+        << buckets_[i] << std::endl;
     }
     std::cout << "total:" << used_size_ << std::endl;
   }
-  void clear(){
+  friend std::ostream& operator<<(std::ostream& ost, const ThisMap& m) {
+    for (size_t i = 0; i < m.bucket_size_; ++i) {
+      ost << "[" << i << "] " << std::flush
+        << m.buckets_[i] << std::endl;
+    }
+    ost << "total:" << m.used_size_ << std::endl;
+    return ost;
+  }
+  void clear() {
     bucket* const new_bk =
       reinterpret_cast<bucket*>(malloc(sizeof(bucket) * INITIAL_SIZE));
     destroy_elements();
     buckets_ = new_bk;
     bucket_size_ = INITIAL_SIZE;
     used_size_ = 0;
-    //delete[] (buckets_);
     free(buckets_);
   }
-  ~Map(){
-    if (!dont_destroy_elements_){
+  ~Map() {
+    if (!dont_destroy_elements_) {
       destroy_elements();
     }
     free(buckets_);
-    //delete[] buckets_;
   }
 private:
   void destroy_elements() /* nothrow */
   {
-    for(size_t i = 0; i < bucket_size_; ++i){
-      if (!buckets_[i].is_empty()){
+    for (size_t i = 0; i < bucket_size_; ++i) {
+      if (!buckets_[i].is_empty()) {
         buckets_[i].delete_kvp();
       }
     }
@@ -625,41 +746,50 @@ private:
       index = (index + 1) & (bucket_size_ - 1);
       empty_bucket = buckets_ + index;
       ++distance;
-    }while (distance < max_distance);
+    } while (distance < max_distance);
 
-    if (max_distance <= distance){
+    if (max_distance <= distance) {
       return false;
     }
 
     /* move empty bucket if it was too far */
-    while (empty_bucket != NULL && SLOTSIZE <= distance){
+    while (empty_bucket != NULL && SLOTSIZE <= distance) {
       swap_to_closer_bucket(&empty_bucket, &distance);
     }
 
-    if (empty_bucket == NULL){
+    if (empty_bucket == NULL) {
       return false;
     }
 
     assert(empty_bucket->is_empty());
 
     empty_bucket->set_kvp(*kvp);
+    empty_bucket->use_slot();
     target_bucket->set_slot_bit(distance);
     return true;
   }
-  inline size_t locate(size_t start, size_t diff)const{
+  inline size_t locate(size_t start, size_t diff) const {
     return (start + diff) & (bucket_size_ - 1);
   }
-  inline bucket* next(bucket* b){
+  inline bucket* next(bucket* b) const {
     return forward(b, 1);
   }
-  inline bucket* forward(bucket* b, size_t stride)const{
+  inline const bucket* next(const bucket* b) const {
+    return forward(b, 1);
+  }
+  inline bucket* forward(bucket* b, size_t stride) const {
     return (b + stride) < &buckets_[bucket_size_] ?
                           b + stride : b + stride - bucket_size_;
   }
-  inline bucket& bucket_index(bucket* start, size_t index){
+  inline const bucket* forward(const bucket* b, size_t stride) const {
+    return (b + stride) < &buckets_[bucket_size_] ?
+                          b + stride : b + stride - bucket_size_;
+  }
+  inline bucket& bucket_index(bucket* start, size_t index) {
     bucket* target = start + index;
     return target < &buckets_[bucket_size_] ? *target : *(target - bucket_size_);
   }
+
   size_t bucket_size_;
   bucket* buckets_;
   size_t used_size_;
@@ -670,4 +800,4 @@ private:
 
 } // namespace nanahan
 
-#endif
+#endif  // NANAHAN_MAP_HPP_

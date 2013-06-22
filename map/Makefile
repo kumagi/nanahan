@@ -1,6 +1,7 @@
 CXX= g++
-OPTS= -O0 -g -std=gnu++0x
+OPTS= -O4 -g -std=gnu++0x
 PROF=
+CFLAGS= -I../../
 #-pg -fno-inline
 WARNS=-W -Wall -Wextra -Wformat=2 -Wstrict-aliasing=4 -Wcast-qual -Wcast-align \
 	-Wwrite-strings -Wfloat-equal -Wpointer-arith -Wswitch-enum
@@ -14,11 +15,13 @@ NOTIFY=&& notify-send Test success! -i ~/themes/ok_icon.png || notify-send Test 
 target:test
 
 test_map:test_map.o map.o libgtest.a
-	$(CXX) $^ -o $@ $(OPTS) $(PROF) $(TEST_LD) $(WARNS)
-test:test_map
+	$(CXX) $^ -o $@ $(OPTS) $(PROF) $(TEST_LD) $(WARNS) $(CFLAGS)
+test:test_map endless_test
 	./test_map --gtest_color=no $(NOTIFY)
 %.o:%.cc map.hpp
-	$(CXX) -c $< -o $@ $(OPTS) $(PROF) $(GTEST_INC) $(HASHMAP_OPS) $(WARNS)
+	$(CXX) -c $< -o $@ $(OPTS) $(PROF) $(GTEST_INC) $(HASHMAP_OPS) $(WARNS) $(CFLAGS)
+endless_test: endless_test.o
+	$(CXX) $< -o $@ -O4 $(PROF) $(WARNS) $(CFLAGS)
 
 # gtest
 libgtest.a:

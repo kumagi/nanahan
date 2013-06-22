@@ -164,9 +164,9 @@ public:
 
     state* old_state;
     qsbr::ref_guard g(qsbr_);
-    for(;;) {
+    for (;;) {
       old_state = states_[my_index].load();
-      if (states_[my_index].compare_exchange_strong(old_state, new_state)){
+      if (states_[my_index].compare_exchange_strong(old_state, new_state)) {
         break;
       }
       assert(false && "something wrong");
@@ -334,7 +334,7 @@ public:
     */
     return result;
   }
-  void help_pop(int tid, uint64_t phase){
+  void help_pop(int tid, uint64_t phase) {
     do {
       int my_index = get_index();
       node* old_head = head_.load();
@@ -350,7 +350,6 @@ public:
             delete finished_state;
           }
         }
-        return;
       }
       node* old_next = old_head->next_.load();
       int old_winner = old_head->winner_.load();
@@ -366,12 +365,11 @@ public:
         }
         if (is_still_pending(tid, phase)) {
           int tmp = old_winner;
-          if (old_head->winner_.compare_exchange_strong(tmp, tid)) {
-            finish();
-          }
+          old_head->winner_.compare_exchange_strong(tmp, tid);
+          finish();
         }
       }
-    } while(is_still_pending(tid, phase));
+    } while (is_still_pending(tid, phase));
   }
 
   bool is_still_pending(const int tid, const uint64_t phase) const {
@@ -392,7 +390,7 @@ public:
 
   void help(uint64_t phase) {
     int tid;
-    while(tid = scan(phase)) {
+    while (tid = scan(phase)) {
       if (states_[tid].load()->push_) {
         help_push(tid, phase);
       } else { // pop
@@ -473,7 +471,7 @@ public:
   size_t size() const {
     size_t result = 0;
     node* ptr = head_.load();
-    while(ptr != NULL) {
+    while (ptr != NULL) {
       result++;
       ptr = ptr->next_.load();
     }
@@ -485,7 +483,7 @@ public:
     stringstream ss;
     ss << "Stack->";
     vector<node*> ptrs; // for check loop
-    while(ptr != NULL) {
+    while (ptr != NULL) {
       ss << *ptr << "->";
       ptr = ptr->next_;
 
@@ -505,7 +503,7 @@ public:
 
   ~Stack() {
     node* ptr = head_.load();
-    while(ptr != NULL) {
+    while (ptr != NULL) {
       node* next = ptr->next_;
       qsbr_.safe_free(ptr);
       ptr = next;
@@ -521,7 +519,7 @@ public:
   }
 private:
   uint64_t load_phase(int tid) const {
-    for(;;) {
+    for (;;) {
       const state* const target = states_[tid].load(memory_order_seq_cst);
       uint64_t tmp_phase = target->phase_;
       if (target == states_[tid].load(memory_order_seq_cst)) {
